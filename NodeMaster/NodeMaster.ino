@@ -69,6 +69,8 @@ void setup()
   // Set up Input/Output pins
   pinMode(9, OUTPUT);        // Status LED
   digitalWrite(9, LOW);
+  pinMode(A0,OUTPUT);        // XBee Sleep Control (Active Low)
+  digitalWrite(A0, LOW);  
   pinMode(2, INPUT);         // RTC Interrupt to wake from sleep
   pinMode(10, OUTPUT);       // Card Select for SD card
   
@@ -87,7 +89,7 @@ void setup()
     I2c.write(address,0x08+i%6,0x76); // Configure FAN Dynamics
     I2c.write(address,0x60+i%6,0x80); // Configure FAN Window
     targetRPM[i]=1200;   
-    tachWrite(address,i%6,targetRPM[i]);      
+    tachWrite(i,targetRPM[i]);      
   }    
   
   // Start XBee
@@ -187,10 +189,9 @@ void setup()
     fanFilePos = NFans+4;
     dataFile.seekSet(4);
     for (int i = 0; i < NFans; i++) {
-      int address = 0x20+(i-1)/6*3;
       prevRPM[i]=dataFile.read()*10;
       targetRPM[i]=prevRPM[i];
-      tachWrite(address,i%6,targetRPM[i]); 
+      tachWrite(i,targetRPM[i]); 
     }
     nextFanTime=2^24*dataFile.read();
     nextFanTime=nextFanTime+2^16*dataFile.read();
@@ -210,8 +211,9 @@ void setup()
   z2.setAcceleration(1400);
   z3.setAcceleration(1400);
    
-  processFlag=false;
   RTC.initAlarm(dStart); // Initialise RTC alarm
+  processFlag=false;
+  attachInterrupt(0, setProcessFlag, LOW);
 }
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -221,7 +223,9 @@ void(* resetFunc) (void) = 0;
 void loop()
 {
   if (processFlag) {
+    RTC.clearAlarm();
     int z1state, z2state, z3state;
+    digitalWrite(9, HIGH);
     
     //-----CHECK FOR INSTRUCTIONS
     xbee.readPacket(500);
@@ -287,10 +291,9 @@ void loop()
     interTime=(dNow.unixtime()-dStart.unixtime())-prevFanTime;
     diffTime=nextFanTime-prevFanTime;
     for (int i = 0; i < NFans; i++) {
-      int address = 0x20+(i-1)/6*3;
-      float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(interTime/diffTime);
+      float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
       targetRPM[i] = (int) target;
-      tachWrite(address,i%6,targetRPM[i]);
+      tachWrite(i,targetRPM[i]);
     }
     
     //-----MAKE & SEND ZIGBEE PAYLOAD
@@ -329,10 +332,9 @@ void loop()
        dataFile.print(interTime);
        showString(PSTR(","));
        dataFile.print(diffTime);
-       for (int i = 6; i < 8; i++) {
-         int address = 0x20+(i-1)/6*3;
+       for (int i = 0; i < NFans; i++) {
          showString(PSTR(","));
-         dataFile.print(tachRead(address,i%6));
+         dataFile.print(tachRead(i));
          showString(PSTR(","));
          dataFile.print(targetRPM[i]);
          showString(PSTR(","));
@@ -344,8 +346,9 @@ void loop()
        dataFile.close();
     }
     
-    processFlag=false;
     setAlarm();
+    delay(500);
+    digitalWrite(9, LOW);
   }  
   
   z1.run();
@@ -390,12 +393,21 @@ void setAlarm(void)
   dAlarm = dStart.unixtime() + runTime;
   
   RTC.setAlarm(dAlarm);
+  processFlag=false;
+  attachInterrupt(0, setProcessFlag, LOW);
 }
 
-void tachWrite(int address, int fan, long rpm)
+void setProcessFlag(void) {
+  detachInterrupt(0);
+  processFlag=true;
+}
+
+
+void tachWrite(int fan, long rpm)
 {
   byte valByte[2];
   long output;
+  int address = 0x20+fan/6*3;
   if (rpm<700) {  
     SR[fan]=2;
     I2c.write(address,0x08+fan%6,0x36); // SR to 2
@@ -411,14 +423,15 @@ void tachWrite(int address, int fan, long rpm)
   output = (long) 60*SR[fan]*8192/rpm/NP; 
   valByte[0]=output>>3 & 0xff;
   valByte[1]=output<<5 & 0xff;
-  I2c.write(address, 0x50+2*fan, valByte, 2);
+  I2c.write(address, 0x50+2*fan%6, valByte, 2);
 }
     
-int tachRead(int address, int fan)
+int tachRead(int fan)
 {
   int msb, lsb;
   long result, count;
-  I2c.read(address, 0x18+2*fan, 2);
+  int address = 0x20+fan/6*3;
+  I2c.read(address, 0x18+2*fan%6, 2);
   if(I2c.available()==2) {
     msb = I2c.receive();
     lsb = I2c.receive();
