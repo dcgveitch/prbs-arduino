@@ -7,7 +7,7 @@
 #include <avr/pgmspace.h>
 
 #define NP 2 // Fan Tach Poles
-#define NFans 12 // Number of Fans
+#define NFans 6 // Number of Fans
 
 // Terminal code for Fat16 formatting
 // Check disk by fomatting straight from Disk Utility and seeing greyed out name
@@ -84,11 +84,11 @@ void setup()
   I2c.write(0x20,0x01,0xbb); // Set Max Freq PWM
   I2c.write(0x23,0x01,0xbb); // Set Max Freq PWM
   for (int i = 0; i < NFans; i++) {
-    int address = 0x20+(i-1)/6*3;
-    I2c.write(address,0x02+i%6,0xe8); // Configure all fans for PWM, 2s Spin Up, with Tach
-    I2c.write(address,0x08+i%6,0x76); // Configure FAN Dynamics
-    I2c.write(address,0x60+i%6,0x80); // Configure FAN Window
-    targetRPM[i]=1200;   
+    int address = 0x20+i/6*3;
+    I2c.write(address,0x02+(i%6),0xe8); // Configure all fans for PWM, 2s Spin Up, with Tach
+    I2c.write(address,0x08+(i%6),0x76); // Configure FAN Dynamics
+    I2c.write(address,0x60+(i%6),0x40); // Configure FAN Window
+    targetRPM[i]=500;   
     tachWrite(i,targetRPM[i]);      
   }    
   
@@ -178,7 +178,7 @@ void setup()
   showString(PSTR(","));
   dataFile.println(nZones);
   dataFile.println();
-  showString(PSTR("Interrupt,Timestamp,SeqCount,SeqPosition,State,RunTime,BatVoltage,VccVoltage,FreeRAM,FanVar\r\n"));
+  showString(PSTR("Interrupt,Timestamp,SeqCount,SeqPosition,State,RunTime,PrevFanTime,NextFanTime,InterTime,DiffTime,Tach1,Target1,Prev1,Next1\r\n"));
   dataFile.close();
   
   //-----START FANS & GAS RELEASE
@@ -186,17 +186,17 @@ void setup()
   dataFile.open("fanspeed.dat", O_READ);
   if (dataFile.isOpen()) {
     prevFanTime = 0;
-    fanFilePos = NFans+4;
     dataFile.seekSet(4);
     for (int i = 0; i < NFans; i++) {
       prevRPM[i]=dataFile.read()*10;
       targetRPM[i]=prevRPM[i];
       tachWrite(i,targetRPM[i]); 
     }
-    nextFanTime=2^24*dataFile.read();
-    nextFanTime=nextFanTime+2^16*dataFile.read();
-    nextFanTime=nextFanTime+2^8*dataFile.read();
-    nextFanTime=nextFanTime+dataFile.read();
+    fanFilePos = NFans+4;
+    nextFanTime=dataFile.read();
+    nextFanTime=nextFanTime+(dataFile.read()*256L);
+    nextFanTime=nextFanTime+(dataFile.read()*65536L);
+    nextFanTime=nextFanTime+(dataFile.read()*16777216L);
     for (int i = 0; i < NFans; i++) {
       nextRPM[i]=dataFile.read()*10;
     }
@@ -268,7 +268,7 @@ void loop()
     if (z3state==1) z3.move(1000000);
     else z3.stop();
     
-    //----- SET FAN SPEEDS
+    //----- CALCULATE FAN SPEEDS
     getTimeS(); 
     // Get correct time and speed points for interpolation
     while ((dNow.unixtime()-dStart.unixtime())>nextFanTime) {
@@ -277,10 +277,10 @@ void loop()
       if (dataFile.isOpen()) {
         dataFile.seekSet(fanFilePos);
         prevFanTime=nextFanTime;
-        nextFanTime=2^24*dataFile.read();
-        nextFanTime=nextFanTime+2^16*dataFile.read();
-        nextFanTime=nextFanTime+2^8*dataFile.read();
-        nextFanTime=nextFanTime+dataFile.read();
+        nextFanTime=dataFile.read();
+        nextFanTime=nextFanTime+(dataFile.read()*256L);
+        nextFanTime=nextFanTime+(dataFile.read()*65536L);
+        nextFanTime=nextFanTime+(dataFile.read()*16777216L);
         for (int i = 0; i < NFans; i++) {
           prevRPM[i]=nextRPM[i];
           nextRPM[i]=dataFile.read()*10;
@@ -293,7 +293,6 @@ void loop()
     for (int i = 0; i < NFans; i++) {
       float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
       targetRPM[i] = (int) target;
-      tachWrite(i,targetRPM[i]);
     }
     
     //-----MAKE & SEND ZIGBEE PAYLOAD
@@ -346,6 +345,11 @@ void loop()
        dataFile.close();
     }
     
+    //-----WRITE FAN SPEEDS
+    for (int i = 0; i < NFans; i++) {
+      tachWrite(i,targetRPM[i]);
+    }
+
     setAlarm();
     delay(500);
     digitalWrite(9, LOW);
@@ -408,22 +412,26 @@ void tachWrite(int fan, long rpm)
   byte valByte[2];
   long output;
   int address = 0x20+fan/6*3;
-  if (rpm<700) {  
-    SR[fan]=2;
-    I2c.write(address,0x08+fan%6,0x36); // SR to 2
+  if (rpm<400) {  
+    SR[fan]=1;
+    I2c.write(address,0x08+(fan%6),0x16); // SR to 1
   }
-  else if (rpm>1200) {
-    SR[fan]=8;
-    I2c.write(address,0x08+fan%6,0x76); // SR to 8
+  else if (rpm<750) {  
+    SR[fan]=2;
+    I2c.write(address,0x08+(fan%6),0x36); // SR to 2
+  }
+  else if (rpm<1500) {
+    SR[fan]=4;
+    I2c.write(address,0x08+(fan%6),0x56); // SR to 4
   }
   else {
-    SR[fan]=4;
-    I2c.write(address,0x08+fan%6,0x56); // SR to 4
+    SR[fan]=8;
+    I2c.write(address,0x08+(fan%6),0x76); // SR to 8
   }
   output = (long) 60*SR[fan]*8192/rpm/NP; 
   valByte[0]=output>>3 & 0xff;
   valByte[1]=output<<5 & 0xff;
-  I2c.write(address, 0x50+2*fan%6, valByte, 2);
+  I2c.write(address, 0x50+2*(fan%6), valByte, 2);
 }
     
 int tachRead(int fan)
@@ -431,7 +439,7 @@ int tachRead(int fan)
   int msb, lsb;
   long result, count;
   int address = 0x20+fan/6*3;
-  I2c.read(address, 0x18+2*fan%6, 2);
+  I2c.read(address, 0x18+2*(fan%6), 2);
   if(I2c.available()==2) {
     msb = I2c.receive();
     lsb = I2c.receive();
