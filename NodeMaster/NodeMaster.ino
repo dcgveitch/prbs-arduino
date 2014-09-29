@@ -7,7 +7,7 @@
 #include <avr/pgmspace.h>
 
 #define NP 2 // Fan Tach Poles
-#define NFans 6 // Number of Fans
+#define NFans 4 // Number of Fans
 
 // Terminal code for Fat16 formatting
 // Check disk by fomatting straight from Disk Utility and seeing greyed out name
@@ -90,7 +90,7 @@ void setup()
     I2c.write(address,0x60+(i%6),0x40); // Configure FAN Window
     targetRPM[i]=500;   
     tachWrite(i,targetRPM[i]);      
-  }    
+  }  
   
   // Start XBee
   Serial.begin(9600);
@@ -190,7 +190,7 @@ void setup()
     for (int i = 0; i < NFans; i++) {
       prevRPM[i]=dataFile.read()*10;
       targetRPM[i]=prevRPM[i];
-      tachWrite(i,targetRPM[i]); 
+      tachWrite(i,targetRPM[i]);
     }
     fanFilePos = NFans+4;
     nextFanTime=dataFile.read();
@@ -413,8 +413,8 @@ void tachWrite(int fan, long rpm)
   long output;
   int address = 0x20+fan/6*3;
   if (rpm<400) {  
-    SR[fan]=1;
-    I2c.write(address,0x08+(fan%6),0x16); // SR to 1
+    SR[fan]=2;
+    I2c.write(address,0x08+(fan%6),0x36); // SR to 1
   }
   else if (rpm<750) {  
     SR[fan]=2;
@@ -429,6 +429,28 @@ void tachWrite(int fan, long rpm)
     I2c.write(address,0x08+(fan%6),0x76); // SR to 8
   }
   output = (long) 60*SR[fan]*8192/rpm/NP; 
+  valByte[0]=output>>3 & 0xff;
+  valByte[1]=output<<5 & 0xff;
+  I2c.write(address, 0x50+2*(fan%6), valByte, 2);
+}
+
+void fanStop(int fan)
+{
+  byte valByte[2];
+  long output;
+  int address = 0x20+fan/6*3;
+  output = 2047;
+  valByte[0]=output>>3 & 0xff;
+  valByte[1]=output<<5 & 0xff;
+  I2c.write(address, 0x50+2*(fan%6), valByte, 2);
+}
+
+void fanRun(int fan)
+{
+  byte valByte[2];
+  long output;
+  int address = 0x20+fan/6*3;
+  output = 0;
   valByte[0]=output>>3 & 0xff;
   valByte[1]=output<<5 & 0xff;
   I2c.write(address, 0x50+2*(fan%6), valByte, 2);
