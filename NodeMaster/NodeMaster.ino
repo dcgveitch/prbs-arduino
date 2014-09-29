@@ -44,9 +44,8 @@ Fat16 dataFile;
 String dataTime, prbsData;
 
 // Fan variables
-int targetRPM[NFans], prevRPM[NFans], nextRPM[NFans];
-long prevFanTime, nextFanTime, interTime, diffTime;
-int SR[NFans], fanFilePos;
+int targetRPM[NFans], prevRPM[NFans], nextRPM[NFans], SR[NFans];
+long prevFanTime, nextFanTime, interTime, diffTime, fanFilePos;
 
 // Motor variables
 AccelStepper z1(AccelStepper::DRIVER, 8, 6);
