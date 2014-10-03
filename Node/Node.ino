@@ -9,9 +9,6 @@
 #include <MemoryFree.h>
 #include <avr/pgmspace.h>
 
-#define NP 2 // Fan Tach Poles
-#define NFans 12 // Number of Fans
-
 // Terminal code for Fat16 formatting
 // Check disk by fomatting straight from Disk Utility and seeing greyed out name
 // diskutil partitionDisk /dev/disk2 1 MBRFormat "MS-DOS FAT16" "M1" 1000M
@@ -39,7 +36,7 @@ ZBRxResponse zbRx = ZBRxResponse();
 // Operating variables
 float dT;
 long runTime, seqCount=0;
-int PRBS, PRBSmultiple, seqLength, seqPeriod, seqPos=0, seqMultiple=0, state=0, CO2max=0, CO2seqMin=2001, CO2seqMax=0;
+int PRBSmultiple, seqLength, seqPeriod, seqPos=0, seqMultiple=0, state=0, CO2max=0, CO2seqMin=2001, CO2seqMax=0;
 int nCO2readings, CO2readingSum, pCO2reading, CO2reading, CO2iReadingSum, pCO2iReading, CO2iReading;
 int interCount;
 
@@ -48,11 +45,6 @@ SdCard card;
 char dataFileName[13];
 Fat16 dataFile;
 String dataTime;
-
-// Fan variables
-int targetRPM[NFans], prevRPM[NFans], nextRPM[NFans];
-long prevFanTime, nextFanTime, interTime, diffTime;
-int SR[NFans], fanFilePos;
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -66,8 +58,6 @@ void setup()
   String dataN;
   
   // Set up Input/Output pins
-  pinMode(8, OUTPUT);        // SSR Pin
-  digitalWrite(8, LOW);
   pinMode(9, OUTPUT);        // Status LED
   digitalWrite(9, LOW);
   pinMode(A0,OUTPUT);        // XBee Sleep Control (Active Low)
@@ -86,26 +76,6 @@ void setup()
   // Set up COZIR CO2 Sensor
   showStringSS(PSTR("K 2\r\n"));  // Set sensor to Polling
   showStringSS(PSTR("M 6\r\n"));  // Return both filtered & unfiltered CO2 Readings
-  
-  // Check for PRBS control
-  if (dataFile.open("prbs.dat", O_READ)) {
-    PRBS=1;
-    dataFile.close();
-    
-    I2c.write(0x20,0x01,0xbb); // Set Max Freq PWM
-    I2c.write(0x23,0x01,0xbb); // Set Max Freq PWM
-    for (int i = 0; i < NFans; i++) {
-      int address = 0x20+(i-1)/6*3;
-      I2c.write(address,0x02+i%6,0xe8); // Configure all fans for PWM, 2s Spin Up, with Tach
-      I2c.write(address,0x08+i%6,0x76); // Configure FAN Dynamics
-      I2c.write(address,0x60+i%6,0x80); // Configure FAN Window
-      targetRPM[i]=1200;   
-      tachWrite(address,i%6,targetRPM[i]);      
-    }    
-  }
-  else {
-    PRBS=0;
-  }
   
   // Start XBee
   Serial.begin(9600);
@@ -198,39 +168,12 @@ void setup()
   dataFile.println();
   showString(PSTR("Interrupt,Timestamp,pCO2,CO2,piCO2,iCO2,Temp,SeqCount,SeqPosition,State,RunTime,BatVoltage,VccVoltage,FreeRAM\r\n"));
   dataFile.close();
-  
-  // Fan speed interpolation function
-  if (PRBS==1) {
-    dataFile.open("fanspeed.dat", O_READ);
-    if (dataFile.isOpen()) {
-      prevFanTime = 0;
-      fanFilePos = NFans+4;
-      dataFile.seekSet(4);
-      for (int i = 0; i < NFans; i++) {
-        int address = 0x20+(i-1)/6*3;
-        prevRPM[i]=dataFile.read()*10;
-        targetRPM[i]=prevRPM[i];
-        tachWrite(address,i%6,targetRPM[i]); 
-      }
-      nextFanTime=2^24*dataFile.read();
-      nextFanTime=nextFanTime+2^16*dataFile.read();
-      nextFanTime=nextFanTime+2^8*dataFile.read();
-      nextFanTime=nextFanTime+dataFile.read();
-      for (int i = 0; i < NFans; i++) {
-        nextRPM[i]=dataFile.read()*10;
-      }
-      dataFile.close();
-    }
-  } 
  
   digitalWrite(A0,HIGH); // Put Zigbee to sleep
   digitalWrite(9, LOW); // Turn off status LED
   RTC.initAlarm(dStart); // Initialise RTC alarm
   flag[0]=2; // Set flag to awake
-  delay(1000); // Delay to let clock settle
-  
-  
-   
+  delay(1000); // Delay to let clock settle 
 }
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -263,10 +206,7 @@ void loop()
   while (xbee.getResponse().isAvailable() == true) {
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
-      if (zbRx.getData(0) == 101) {
-        if (PRBS==0) state=!state; // Manual Remote Tracer Control
-      }
-      else if (zbRx.getData(0) == 102) {
+      if (zbRx.getData(0) == 102) {
         showStringSS(PSTR("G\r\n"));
         delay(1000);
       }
@@ -280,19 +220,7 @@ void loop()
   }
   delay(250);
   digitalWrite(A0,HIGH);  // XBee off
-  
-  // PRBS MODEL: Read output state from SD file
-  if (PRBS==1) { 
-    dataFile.open("prbs.dat", O_READ);
-    if (dataFile.isOpen()) {
-      if (dataFile.seekSet(seqPos)) {
-        state = dataFile.read();
-      }
-      dataFile.close();
-    }
-  }
-  
-  
+
   // Request temperature from 1Wire Temp Sensor
   tempReq();
    
@@ -308,10 +236,6 @@ void loop()
   
   // Get time and set outputs
   getTimeS();
-  if (state==1) {
-    digitalWrite(8,HIGH);
-  }
-  else digitalWrite(8,LOW);
   
   // 5 readings after changing outputs
   tCheck=millis();
@@ -340,36 +264,6 @@ void loop()
   voltReading = (float) voltRaw/1023*3.3*2;
   vccRaw = readVcc();
   vccReading = (float) vccRaw/1000;
-  
-  // Set fan speed
-  if (PRBS==1) {
-    // Get correct time and speed points for interpolation
-    while ((dNow.unixtime()-dStart.unixtime())>nextFanTime) {
-      fanFilePos = fanFilePos+NFans+4;
-      dataFile.open("fanspeed.dat", O_READ);
-      if (dataFile.isOpen()) {
-        dataFile.seekSet(fanFilePos);
-        prevFanTime=nextFanTime;
-        nextFanTime=2^24*dataFile.read();
-        nextFanTime=nextFanTime+2^16*dataFile.read();
-        nextFanTime=nextFanTime+2^8*dataFile.read();
-        nextFanTime=nextFanTime+dataFile.read();
-        for (int i = 0; i < NFans; i++) {
-          prevRPM[i]=nextRPM[i];
-          nextRPM[i]=dataFile.read()*10;
-        }
-      }
-      dataFile.close();
-    }
-    interTime=(dNow.unixtime()-dStart.unixtime())-prevFanTime;
-    diffTime=nextFanTime-prevFanTime;
-    for (int i = 0; i < NFans; i++) {
-      int address = 0x20+(i-1)/6*3;
-      float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(interTime/diffTime);
-      targetRPM[i] = (int) target;
-      tachWrite(address,i%6,targetRPM[i]);
-    }
-  }
   
   // Add CO2 & temperature readings into XBee mPayload  
   mPayload[0] = 3; // Measurement Identifier
@@ -440,29 +334,7 @@ void loop()
      showString(PSTR(","));
      dataFile.print(vccReading);
      showString(PSTR(","));
-     dataFile.print(memory);
-     showString(PSTR(","));
-     dataFile.print(prevFanTime);
-     showString(PSTR(","));
-     dataFile.print(nextFanTime);
-     showString(PSTR(","));
-     dataFile.print(interTime);
-     showString(PSTR(","));
-     dataFile.print(diffTime);
-     if (PRBS==1) {
-       for (int i = 6; i < 8; i++) {
-         int address = 0x20+(i-1)/6*3;
-         showString(PSTR(","));
-         dataFile.print(tachRead(address,i%6));
-         showString(PSTR(","));
-         dataFile.print(targetRPM[i]);
-         showString(PSTR(","));
-         dataFile.print(prevRPM[i]);
-         showString(PSTR(","));
-         dataFile.print(nextRPM[i]);
-       }
-     }
-     dataFile.println();
+     dataFile.println(memory);
      dataFile.close();
   }
   
@@ -559,42 +431,6 @@ int tempRead(void)
   for (int i = 0; i < 9; i++) {data[i] = ds.read();}
   int raw = (data[1] << 8) | data[0];
   return raw;
-}
-
-void tachWrite(int address, int fan, long rpm)
-{
-  byte valByte[2];
-  long output;
-  if (rpm<700) {  
-    SR[fan]=2;
-    I2c.write(address,0x08+fan%6,0x36); // SR to 2
-  }
-  else if (rpm>1200) {
-    SR[fan]=8;
-    I2c.write(address,0x08+fan%6,0x76); // SR to 8
-  }
-  else {
-    SR[fan]=4;
-    I2c.write(address,0x08+fan%6,0x56); // SR to 4
-  }
-  output = (long) 60*SR[fan]*8192/rpm/NP; 
-  valByte[0]=output>>3 & 0xff;
-  valByte[1]=output<<5 & 0xff;
-  I2c.write(address, 0x50+2*fan, valByte, 2);
-}
-    
-int tachRead(int address, int fan)
-{
-  int msb, lsb;
-  long result, count;
-  I2c.read(address, 0x18+2*fan, 2);
-  if(I2c.available()==2) {
-    msb = I2c.receive();
-    lsb = I2c.receive();
-    count = msb<<3 | lsb>>5;
-  }
-  result = (long) 60*SR[fan]*8192/count/NP;
-  return result;
 }
 
 void wakeUpNow()

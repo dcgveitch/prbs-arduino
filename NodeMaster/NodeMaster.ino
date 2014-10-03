@@ -48,9 +48,9 @@ int targetRPM[NFans], prevRPM[NFans], nextRPM[NFans], SR[NFans];
 long prevFanTime, nextFanTime, interTime, diffTime, fanFilePos;
 
 // Motor variables
-AccelStepper z1(AccelStepper::DRIVER, 8, 6);
+AccelStepper z1(AccelStepper::DRIVER, 8, 5);
 AccelStepper z2(AccelStepper::DRIVER, 7, 5); 
-AccelStepper z3(AccelStepper::DRIVER, 8, 6);
+AccelStepper z3(AccelStepper::DRIVER, 6, 5);
 int z1speed=700, z2speed=420, z3speed=0;
 
 //------------------------------------------------------------------------------
@@ -250,12 +250,20 @@ void loop()
     
     //----- SET PUMPS
     // Read prbs states from SD Card
-    dataFile.open(prbsFileName, O_READ);
+    dataFile.open("prbs15z2.dat", O_READ);
     if (dataFile.isOpen()) {
-      if (dataFile.seekSet(seqPos*3)) {
+      if (dataFile.seekSet(seqPos*nZones)) {
+        delay(200);
+        digitalWrite(9, LOW);
+        delay(200);
+        digitalWrite(9, HIGH);
+        delay(200);
+        digitalWrite(9, LOW);
+        delay(200);
+        digitalWrite(9, HIGH);
         z1state = dataFile.read();
-        z2state = dataFile.read();
-        z3state = dataFile.read();
+        if (nZones>1) z2state = dataFile.read();
+        if (nZones>2) z3state = dataFile.read();
       }
       dataFile.close();
     }
@@ -304,6 +312,8 @@ void loop()
     mPayload[12] = seqPos & 0xff;
     mPayload[13] = seqLength >> 8 & 0xff;
     mPayload[14] = seqLength & 0xff;
+    mPayload[28] = z1state;
+    mPayload[29] = z2state;
     
     // Transmit ZBee mPayload
     xbee.send(zbTxM);
