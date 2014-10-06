@@ -156,9 +156,9 @@ void setup()
   
   //---- SET UP FILES & SD CARD  
   //Assemble PRBS filename
-  prbsData = "prbs_"; 
+  prbsData = "prbs"; 
   prbsData += seqLength;
-  prbsData += "_";
+  prbsData += "z";
   prbsData += nZones;
   prbsData += ".dat";
   prbsData.toCharArray(prbsFileName,sizeof(prbsFileName));
@@ -230,7 +230,7 @@ void loop()
     digitalWrite(9, HIGH);
     
     //-----CHECK FOR INSTRUCTIONS
-    xbee.readPacket(500);
+    xbee.readPacket(25);
     while (xbee.getResponse().isAvailable() == true) {
       if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
         xbee.getResponse().getZBRxResponse(zbRx);
@@ -250,23 +250,14 @@ void loop()
           while (true);
         }
       }
-      delay(50);
-      xbee.readPacket(450); // Check for instructions
+      xbee.readPacket(25); // Check for instructions
     }
     
     //----- SET PUMPS
     // Read prbs states from SD Card
-    dataFile.open("prbs15z2.dat", O_READ);
+    dataFile.open(prbsFileName, O_READ);
     if (dataFile.isOpen()) {
       if (dataFile.seekSet(seqPos*nZones)) {
-        delay(200);
-        digitalWrite(9, LOW);
-        delay(200);
-        digitalWrite(9, HIGH);
-        delay(200);
-        digitalWrite(9, LOW);
-        delay(200);
-        digitalWrite(9, HIGH);
         z1state = dataFile.read();
         if (nZones>1) z2state = dataFile.read();
         if (nZones>2) z3state = dataFile.read();
@@ -375,7 +366,6 @@ void loop()
     }
 
     setAlarm();
-    delay(500);
     digitalWrite(9, LOW);
   }  
   
