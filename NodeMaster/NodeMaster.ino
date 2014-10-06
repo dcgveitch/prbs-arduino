@@ -44,14 +44,14 @@ Fat16 dataFile;
 String dataTime, prbsData;
 
 // Fan variables
-int targetRPM[NFans], prevRPM[NFans], nextRPM[NFans], SR[NFans];
+int targetRPM[NFans], actualRPM[NFans], prevRPM[NFans], nextRPM[NFans], SR[NFans];
 long prevFanTime, nextFanTime, interTime, diffTime, fanFilePos;
 
 // Motor variables
 AccelStepper z1(AccelStepper::DRIVER, 8, 5);
 AccelStepper z2(AccelStepper::DRIVER, 7, 5); 
 AccelStepper z3(AccelStepper::DRIVER, 6, 5);
-int z1speed=700, z2speed=420, z3speed=0;
+int z1speed, z2speed, z3speed;
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -110,7 +110,7 @@ void setup()
       if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
         xbee.getResponse().getZBRxResponse(zbRx);
         // Initialisation command
-        if (zbRx.getData(0) == 99 && zbRx.getData(1) == 99 && zbRx.getData(2) == 99) { // Check first 3 bytes for 99,99,99 identifier
+        if (zbRx.getData(0) == 99) { // Check first byte for 99 identifier
           initialised = true;
           dSync =  (zbRx.getData(3) * 16777216L) + (zbRx.getData(4) * 65536L) + (zbRx.getData(5) * 256L) + zbRx.getData(6);
           RTC.adjust(dSync); // Sychronise RTC       
@@ -120,6 +120,9 @@ void setup()
           PRBSmultiple = zbRx.getData(15);
           nZones= zbRx.getData(16);
           dT = seqPeriod / (seqLength*PRBSmultiple);
+          z1speed = zbRx.getData(17)*400/60;
+          z2speed = zbRx.getData(18)*400/60;
+		  z3speed = zbRx.getData(19)*400/60;
         }
         // Readout command
         if (zbRx.getData(0) == 103) { // Check first byte for identifier
@@ -130,7 +133,7 @@ void setup()
          
           while (Fat16::readDir(&dir, &index)) index++;
           dataFile.open(index-1, O_READ);
-          dPayload[0]=4; // Data packet identifier
+          dPayload[0]=5; // Data packet identifier
           while ((c = dataFile.read()) > 0) {
             dPayload[i]=c;
             i++;
@@ -235,9 +238,12 @@ void loop()
           if (PRBS==0) state=!state; // Manual Remote Tracer Control
         }
         else if (zbRx.getData(0) == 110) { // Change motor speeds
-          z1.setMaxSpeed(zbRx.getData(1)*10);
-          z2.setMaxSpeed(zbRx.getData(2)*10);
-          z3.setMaxSpeed(zbRx.getData(3)*10);
+          z1speed=zbRx.getData(1)*400/60;
+          z2speed=zbRx.getData(2)*400/60;
+          z3speed=zbRx.getData(3)*400/60;
+          z1.setMaxSpeed(z1speed);
+          z2.setMaxSpeed(z2speed);
+          z3.setMaxSpeed(z3speed);
         }
         else if (zbRx.getData(0) == 109) {
           resetFunc();  //call reset
@@ -300,20 +306,29 @@ void loop()
     for (int i = 0; i < NFans; i++) {
       float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
       targetRPM[i] = (int) target;
+      actualRPM[i] = tachRead(i);
     }
     
     //-----MAKE & SEND ZIGBEE PAYLOAD
-    mPayload[0] = 3; // Measurement Identifier
-    mPayload[7] = seqCount >> 8 & 0xff;
-    mPayload[8] = seqCount & 0xff;
-    mPayload[9] = seqPeriod/60 >> 8 & 0xff;
-    mPayload[10] = seqPeriod/60 & 0xff;
-    mPayload[11] = seqPos >> 8 & 0xff;
-    mPayload[12] = seqPos & 0xff;
-    mPayload[13] = seqLength >> 8 & 0xff;
-    mPayload[14] = seqLength & 0xff;
-    mPayload[28] = z1state;
-    mPayload[29] = z2state;
+    mPayload[0] = 3; // Master Identifier
+    mPayload[1] = seqCount >> 8 & 0xff;
+    mPayload[2] = seqCount & 0xff;
+    mPayload[3] = seqPeriod/60 >> 8 & 0xff;
+    mPayload[4] = seqPeriod/60 & 0xff;
+    mPayload[5] = seqPos >> 8 & 0xff;
+    mPayload[6] = seqPos & 0xff;
+    mPayload[7] = seqLength >> 8 & 0xff;
+    mPayload[8] = seqLength & 0xff;
+    mPayload[9] = z1state;
+    mPayload[10] = z2state;
+    mPayload[11] = z3state;
+    mPayload[12] = z1speed;
+    mPayload[13] = z2speed;
+    mPayload[14] = z3speed;
+    mPayload[15] = NFans;
+    for (int i = 0; i < NFans; i++) {
+      mPayload[16+i] = actualRPM[i]/10;
+    }
     
     // Transmit ZBee mPayload
     xbee.send(zbTxM);

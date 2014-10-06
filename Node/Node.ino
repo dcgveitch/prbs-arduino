@@ -116,7 +116,7 @@ void setup()
           while (Fat16::readDir(&dir, &index)) index++;
           dataFile.open(index-1, O_READ);
           
-          dPayload[0]=4; // Data packet identifier
+          dPayload[0]=5; // Data packet identifier
           while ((c = dataFile.read()) > 0) {
             dPayload[i]=c;
             i++;
@@ -266,34 +266,31 @@ void loop()
   vccReading = (float) vccRaw/1000;
   
   // Add CO2 & temperature readings into XBee mPayload  
-  mPayload[0] = 3; // Measurement Identifier
-  mPayload[1] = CO2reading >> 8 & 0xff;
-  mPayload[2] = CO2reading & 0xff;
-  mPayload[3] = CO2iReading >> 8 & 0xff;
-  mPayload[4] = CO2iReading & 0xff;
-  mPayload[5] = tempInput >> 8 & 0xff;
-  mPayload[6] = tempInput & 0xff;
-  mPayload[7] = seqCount >> 8 & 0xff;
-  mPayload[8] = seqCount & 0xff;
-  mPayload[9] = seqPeriod/60 >> 8 & 0xff;
-  mPayload[10] = seqPeriod/60 & 0xff;
-  mPayload[11] = seqPos >> 8 & 0xff;
-  mPayload[12] = seqPos & 0xff;
-  mPayload[13] = seqLength >> 8 & 0xff;
-  mPayload[14] = seqLength & 0xff;
-  mPayload[15] = CO2max >> 8 & 0xff;
-  mPayload[16] = CO2max & 0xff;
-  mPayload[17] = CO2seqMin >> 8 & 0xff;
-  mPayload[18] = CO2seqMin & 0xff;
-  mPayload[19] = CO2seqMax >> 8 & 0xff;
-  mPayload[20] = CO2seqMax & 0xff;
-  mPayload[21] = state;
-  mPayload[22] = voltRaw >> 8 & 0xff;
-  mPayload[23] = voltRaw & 0xff;
-  mPayload[24] = vccRaw >> 8 & 0xff;
-  mPayload[25] = vccRaw & 0xff;
-  mPayload[26] = memory >> 8 & 0xff;
-  mPayload[27] = memory & 0xff;
+  mPayload[0] = 4; // Measurement Identifier
+  mPayload[1] = seqCount >> 8 & 0xff;
+  mPayload[2] = seqCount & 0xff;
+  mPayload[3] = seqPeriod/60 >> 8 & 0xff;
+  mPayload[4] = seqPeriod/60 & 0xff;
+  mPayload[5] = seqPos >> 8 & 0xff;
+  mPayload[6] = seqPos & 0xff;
+  mPayload[7] = seqLength >> 8 & 0xff;
+  mPayload[8] = seqLength & 0xff;
+  mPayload[9] = CO2reading >> 8 & 0xff;
+  mPayload[10] = CO2reading & 0xff;
+  mPayload[11] = CO2iReading >> 8 & 0xff;
+  mPayload[12] = CO2iReading & 0xff;
+  mPayload[13] = CO2max >> 8 & 0xff;
+  mPayload[14] = CO2max & 0xff;
+  mPayload[15] = CO2seqMin >> 8 & 0xff;
+  mPayload[16] = CO2seqMin & 0xff;
+  mPayload[17] = CO2seqMax >> 8 & 0xff;
+  mPayload[18] = CO2seqMax & 0xff;
+  mPayload[19] = tempInput >> 8 & 0xff;
+  mPayload[20] = tempInput & 0xff;
+  mPayload[21] = voltRaw >> 8 & 0xff;
+  mPayload[22] = voltRaw & 0xff;
+  mPayload[23] = vccRaw >> 8 & 0xff;
+  mPayload[24] = vccRaw & 0xff;
   
   // Transmit ZBee mPayload
   digitalWrite(A0,LOW);
