@@ -32,7 +32,7 @@ ZBRxResponse zbRx = ZBRxResponse();
 // Operating variables
 float dT;
 long runTime, seqCount=0;
-int PRBS, PRBSmultiple, seqLength, seqPeriod, seqPos=0, seqMultiple=0, nZones;
+int PRBS, PRBSmultiple, seqLength, seqPeriod, seqPos=0, seqMultiple=0, state=0, nZones;
 int interCount;
 boolean processFlag;
 
@@ -49,10 +49,9 @@ long prevFanTime, nextFanTime, interTime, diffTime, fanFilePos;
 
 // Motor variables
 AccelStepper z1(AccelStepper::DRIVER, 8, 5);
-AccelStepper z2(AccelStepper::DRIVER, 7, 5); 
-AccelStepper z3(AccelStepper::DRIVER, 6, 5); 
-int z1state=0, z2state=0, z3state=0;
-int z1speed, z2speed, z3speed;
+AccelStepper z2(AccelStepper::DRIVER, 7, 4); 
+int z1state=0, z2state=0;
+int z1speed, z2speed;
 
 
 //------------------------------------------------------------------------------
@@ -124,7 +123,6 @@ void setup()
           dT = seqPeriod / (seqLength*PRBSmultiple);
           z1speed = zbRx.getData(15)*10;
           z2speed = zbRx.getData(16)*10;
-          z3speed = zbRx.getData(17)*10;
         }
         // Readout command
         if (zbRx.getData(0) == 103) { // Check first byte for identifier
@@ -182,7 +180,7 @@ void setup()
   showString(PSTR(","));
   dataFile.println(nZones);
   dataFile.println();
-  showString(PSTR("Interrupt,Timestamp,SeqCount,SeqPosition,RunTime,PrevFanTime,NextFanTime,InterTime,DiffTime,Tach1,Target1,Prev1,Next1\r\n"));
+  showString(PSTR("Interrupt,Timestamp,SeqCount,SeqPosition,State,RunTime,PrevFanTime,NextFanTime,InterTime,DiffTime,Tach1,Target1,Prev1,Next1\r\n"));
   dataFile.close();
   
   //-----START FANS & GAS RELEASE
@@ -210,10 +208,8 @@ void setup()
   // Setup motor parameters
   z1.setMaxSpeed(z1speed);
   z2.setMaxSpeed(z2speed);
-  z3.setMaxSpeed(z3speed);
   z1.setAcceleration(z1speed*2);
   z2.setAcceleration(z2speed*2);
-  z3.setAcceleration(z3speed*2);
    
   RTC.initAlarm(dStart); // Initialise RTC alarm
   processFlag=false;
@@ -228,23 +224,14 @@ void(* resetFunc) (void) = 0;
 void loop()
 {
   if (processFlag) {
-    long timeStamp=millis();    
-    while (millis()-timeStamp<3300) { // Delay to align with main nodes
-      z1.run();
-      z2.run();
-      z3.run();
-    }
     xbee.send(zbTxF);
-    
     z1.stop();
     z2.stop();
-    z3.stop();
     
-    timeStamp=millis();    
+    long timeStamp=millis();    
     while (millis()-timeStamp<500) {
       z1.run();
       z2.run();
-      z3.run();
     }
     RTC.clearAlarm();
     digitalWrite(9, HIGH);
@@ -254,16 +241,16 @@ void loop()
     while (xbee.getResponse().isAvailable() == true) {
       if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
         xbee.getResponse().getZBRxResponse(zbRx);
-        if (zbRx.getData(0) == 110) { // Change motor speeds
+        if (zbRx.getData(0) == 101) {
+          if (PRBS==0) state=!state; // Manual Remote Tracer Control
+        }
+        else if (zbRx.getData(0) == 110) { // Change motor speeds
           z1speed=zbRx.getData(1)*10;
           z2speed=zbRx.getData(2)*10;
-          z3speed=zbRx.getData(3)*10;
           z1.setMaxSpeed(z1speed);
           z2.setMaxSpeed(z2speed);
-          z3.setMaxSpeed(z3speed);
           z1.setAcceleration(z1speed*2);
           z2.setAcceleration(z2speed*2);
-          z3.setAcceleration(z3speed*2);
         }
         else if (zbRx.getData(0) == 109) {
           resetFunc();  //call reset
@@ -279,8 +266,7 @@ void loop()
     if (dataFile.isOpen()) {
       if (dataFile.seekSet(seqPos*nZones)) {
         z1state = dataFile.read();
-        if (nZones>1) z2state = dataFile.read();
-        if (nZones>2) z3state = dataFile.read();
+        z2state = dataFile.read();
       }
       dataFile.close();
     }
@@ -288,7 +274,6 @@ void loop()
     // Run or stop pumps
     if (z1state==1) z1.move(30000);
     if (z2state==1) z2.move(30000);
-    if (z3state==1) z3.move(30000);
 
     //----- CALCULATE FAN SPEEDS
     getTimeS(); 
@@ -331,10 +316,8 @@ void loop()
     mPayload[8] = seqLength & 0xff;
     mPayload[9] = z1state;
     mPayload[10] = z2state;
-    mPayload[11] = z3state;
     mPayload[12] = z1speed/10;
     mPayload[13] = z2speed/10;
-    mPayload[14] = z3speed/10;
     mPayload[15] = NFans;
     for (int i = 0; i < NFans; i++) {
       mPayload[16+i] = actualRPM[i]/10;
@@ -353,6 +336,8 @@ void loop()
        dataFile.print(seqCount);
        showString(PSTR(","));
        dataFile.print(seqPos);
+       showString(PSTR(","));
+       dataFile.print(state);
        showString(PSTR(","));
        dataFile.print(runTime);
        showString(PSTR(","));
@@ -388,7 +373,6 @@ void loop()
   
   z1.run();
   z2.run();
-  z3.run();
 }
 
 //------------------------------------------------------------------------------

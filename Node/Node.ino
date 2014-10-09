@@ -95,14 +95,14 @@ void setup()
       if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
         xbee.getResponse().getZBRxResponse(zbRx);
         // Initialisation command
-        if (zbRx.getData(0) == 99 && zbRx.getData(1) == 99 && zbRx.getData(2) == 99) { // Check first 3 bytes for 99,99,99 identifier
+        if (zbRx.getData(0) == 99) { // Check first byte for 99 identifier
           initialised = true;
-          dSync =  (zbRx.getData(3) * 16777216L) + (zbRx.getData(4) * 65536L) + (zbRx.getData(5) * 256L) + zbRx.getData(6);
+          dSync =  (zbRx.getData(1) * 16777216L) + (zbRx.getData(2) * 65536L) + (zbRx.getData(3) * 256L) + zbRx.getData(4);
           RTC.adjust(dSync); // Sychronise RTC       
-          dStart =  (zbRx.getData(7) * 16777216L) + (zbRx.getData(8) * 65536L) + (zbRx.getData(9) * 256L) + zbRx.getData(10);
-          seqLength = (zbRx.getData(11) * 256L) + zbRx.getData(12);
-          seqPeriod = ((zbRx.getData(13) * 256L) + zbRx.getData(14))*60;
-          PRBSmultiple = zbRx.getData(15);
+          dStart =  (zbRx.getData(5) * 16777216L) + (zbRx.getData(6) * 65536L) + (zbRx.getData(7) * 256L) + zbRx.getData(8);
+          seqLength = (zbRx.getData(9) * 256L) + zbRx.getData(10);
+          seqPeriod = ((zbRx.getData(11) * 256L) + zbRx.getData(12))*60;
+          PRBSmultiple = zbRx.getData(13);
           dT = seqPeriod / (seqLength*PRBSmultiple);
         }
         // Readout command
