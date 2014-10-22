@@ -32,7 +32,6 @@ ZBTxRequest zbTxM = ZBTxRequest(addr64, mPayload, sizeof(mPayload));
 ZBTxRequest zbTxD = ZBTxRequest(addr64, dPayload, sizeof(dPayload));
 ZBTxRequest zbTxF = ZBTxRequest(addr64, flag, sizeof(flag));
 ZBRxResponse zbRx = ZBRxResponse();
-ZBTxStatusResponse txStatus = ZBTxStatusResponse();
 
 // Operating variables
 float dT;
@@ -123,14 +122,13 @@ void setup()
             i++;
             if (i>69) {
               i=1;
-              dataSend();
-            }
+              
           }
           while (i<70) { // Wipe rest of packet
             dPayload[i]=0;
             i++;
           }            
-          dataSend();         
+          xbee.send(zbTxD);         
           dataFile.close();
         } 
       }
@@ -256,7 +254,9 @@ void loop()
   if (CO2reading>CO2max) CO2max = CO2reading;
   if (CO2reading>CO2seqMax) CO2seqMax = CO2reading;
   if (CO2reading<CO2seqMin) CO2seqMin = CO2reading;
-    
+  
+  voltReading = (float) analogRead(A1)/1023*3.3*2;
+  
   memory = freeMemory();
 
   voltRaw = analogRead(A1);
@@ -451,17 +451,18 @@ void dataSend(void)
   do {
     xbee.send(zbTxD);
     if (xbee.readPacket(500)) {
-      if (xbee.getResponse().getApiId() == ZB_TX_STATUS_RESPONSE) {
+      if (xbee.getResponse().getApiId() == TX_STATUS_RESPONSE) {
         xbee.getResponse().getZBTxStatusResponse(txStatus);
-        if (txStatus.getDeliveryStatus() == SUCCESS) {
+        if (txStatus.getStatus() == SUCCESS) {
           success=1;
         } 
       }      
     }
   } while (success==0);
 }
-
-long readVcc() {
+  
+long readVcc() 
+{
   long result;
   // Read 1.1V reference against AVcc
   ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
@@ -472,19 +473,6 @@ long readVcc() {
   result |= ADCH<<8;
   result = 1126400L / result; // Back-calculate AVcc in mV
   return result;
-}
-
-void flashLed(int pin, int times, int wait) 
-{   
-  for (int i = 0; i < times; i++) {
-    digitalWrite(pin, HIGH);
-    delay(wait);
-    digitalWrite(pin, LOW);
-    
-    if (i + 1 < times) {
-      delay(wait);
-    }
-  }
 }
 
 void showString (PGM_P s) {
