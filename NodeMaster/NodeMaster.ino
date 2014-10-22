@@ -1,6 +1,6 @@
 #include <XBee.h>
 #include <I2C.h>
-#include <AccelStepper.h>
+#include <AccelStepper_DV.h>
 #include "RTClib_DV.h"
 #include <Fat16.h>
 #include <Fat16util.h>
@@ -20,14 +20,15 @@ DateTime dStart, dAlarm, dNow;
 // XBee variables
 XBee xbee = XBee(); 
 
-uint8_t mPayload[30];
+uint8_t mPayload[32];
 uint8_t dPayload[70];
 uint8_t flag[1];
-XBeeAddress64 addr64 = XBeeAddress64(0x00000000, 0x00000000); // Coordinator Address
+XBeeAddress64 addr64 = XBeeAddress64(0x0013A200, 0x40866510); // Comp Address
 ZBTxRequest zbTxM = ZBTxRequest(addr64, mPayload, sizeof(mPayload));
 ZBTxRequest zbTxD = ZBTxRequest(addr64, dPayload, sizeof(dPayload));
 ZBTxRequest zbTxF = ZBTxRequest(addr64, flag, sizeof(flag));
 ZBRxResponse zbRx = ZBRxResponse();
+ZBTxStatusResponse txStatus = ZBTxStatusResponse();
 
 // Operating variables
 float dT;
@@ -35,6 +36,8 @@ long runTime, seqCount=0;
 int PRBS, PRBSmultiple, seqLength, seqPeriod, seqPos=0, seqMultiple=0, nZones;
 int interCount;
 boolean processFlag;
+int voltRaw, vccRaw;
+float voltReading, vccReading;
 
 // SD Card variables
 SdCard card;
@@ -50,9 +53,9 @@ long prevFanTime, nextFanTime, interTime, diffTime, fanFilePos;
 // Motor variables
 AccelStepper z1(AccelStepper::DRIVER, 8, 5);
 AccelStepper z2(AccelStepper::DRIVER, 7, 5); 
-AccelStepper z3(AccelStepper::DRIVER, 6, 5); 
-int z1state=0, z2state=0, z3state=0;
-int z1speed, z2speed, z3speed;
+int z1state=0, z2state=0;
+int z1speed, z2speed;
+boolean z1run, z2run;
 
 
 //------------------------------------------------------------------------------
@@ -124,7 +127,6 @@ void setup()
           dT = seqPeriod / (seqLength*PRBSmultiple);
           z1speed = zbRx.getData(15)*10;
           z2speed = zbRx.getData(16)*10;
-          z3speed = zbRx.getData(17)*10;
         }
         // Readout command
         if (zbRx.getData(0) == 103) { // Check first byte for identifier
@@ -132,25 +134,27 @@ void setup()
           int16_t c;
           dir_t dir;
           int i=1;
-         
+          
+          // read next directory entry
           while (Fat16::readDir(&dir, &index)) index++;
           dataFile.open(index-1, O_READ);
+          
           dPayload[0]=5; // Data packet identifier
           while ((c = dataFile.read()) > 0) {
             dPayload[i]=c;
             i++;
             if (i>69) {
               i=1;
-              xbee.send(zbTxD);
+              dataSend();
             }
           }
           while (i<70) { // Wipe rest of packet
             dPayload[i]=0;
             i++;
           }            
-          xbee.send(zbTxD);         
+          dataSend();         
           dataFile.close();
-        } 
+        }
       }
     }
   }
@@ -158,7 +162,7 @@ void setup()
   
   //---- SET UP FILES & SD CARD  
   //Assemble PRBS filename
-  prbsData = "prbs"; 
+  prbsData = "zpbs"; 
   prbsData += seqLength;
   prbsData += "z";
   prbsData += nZones;
@@ -182,12 +186,12 @@ void setup()
   showString(PSTR(","));
   dataFile.println(nZones);
   dataFile.println();
-  showString(PSTR("Interrupt,Timestamp,SeqCount,SeqPosition,RunTime,PrevFanTime,NextFanTime,InterTime,DiffTime,Tach1,Target1,Prev1,Next1\r\n"));
+  showString(PSTR("Interrupt,Timestamp,SeqCount,SeqPosition,RunTime,z1State,z2State,z1Speed,z2Speed,PrevFanTime,NextFanTime,Tach,Target\r\n"));
   dataFile.close();
   
   //-----START FANS & GAS RELEASE
   // Set initial fan speed
-  dataFile.open("fanspeed.dat", O_READ);
+  dataFile.open("zfnspeed.dat", O_READ);
   if (dataFile.isOpen()) {
     prevFanTime = 0;
     dataFile.seekSet(4);
@@ -206,17 +210,26 @@ void setup()
     }
     dataFile.close();
   }
+  else {
+    for (int i = 0; i < 3; i++) { 
+      digitalWrite(9, HIGH);
+      delay(100);
+      digitalWrite(9, LOW);
+      delay(100);
+    }
+  }
+    
   
   // Setup motor parameters
   z1.setMaxSpeed(z1speed);
   z2.setMaxSpeed(z2speed);
-  z3.setMaxSpeed(z3speed);
   z1.setAcceleration(z1speed);
   z2.setAcceleration(z2speed);
-  z3.setAcceleration(z3speed);
+  z1.setSpeed(0);
+  z2.setSpeed(0);
    
   RTC.initAlarm(dStart); // Initialise RTC alarm
-  processFlag=false;
+  processFlag=true;
   flag[0]=2; // Set flag to awake
   attachInterrupt(0, setProcessFlag, LOW);
 }
@@ -227,168 +240,178 @@ void(* resetFunc) (void) = 0;
 //------------------------------------------------------------------------------
 void loop()
 {
-  if (processFlag) {
-    long timeStamp=millis();    
-    while (millis()-timeStamp<2800) { // Delay to align with main nodes
-      z1.run();
-      z2.run();
-      z3.run();
-    }
-    xbee.send(zbTxF);
-    
-    z1.stop();
-    z2.stop();
-    z3.stop();
-    
-    timeStamp=millis();    
-    while (millis()-timeStamp<1000) {
-      z1.run();
-      z2.run();
-      z3.run();
-    }
-    RTC.clearAlarm();
-    digitalWrite(9, HIGH);
-    
-    //-----CHECK FOR INSTRUCTIONS
-    xbee.readPacket(5);
-    while (xbee.getResponse().isAvailable() == true) {
-      if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
-        xbee.getResponse().getZBRxResponse(zbRx);
-        if (zbRx.getData(0) == 110) { // Change motor speeds
-          z1speed=zbRx.getData(1)*10;
-          z2speed=zbRx.getData(2)*10;
-          z3speed=zbRx.getData(3)*10;
-          z1.setMaxSpeed(z1speed);
-          z2.setMaxSpeed(z2speed);
-          z3.setMaxSpeed(z3speed);
-          z1.setAcceleration(z1speed);
-          z2.setAcceleration(z2speed);
-          z3.setAcceleration(z3speed);
-        }
-        else if (zbRx.getData(0) == 109) {
-          resetFunc();  //call reset
-          while (true);
-        }
-      }
-      xbee.readPacket(5); // Check for instructions
-    }
-    
-    //----- SET PUMPS
-    // Read prbs states from SD Card
-    dataFile.open(prbsFileName, O_READ);
-    if (dataFile.isOpen()) {
-      if (dataFile.seekSet(seqPos*nZones)) {
-        z1state = dataFile.read();
-        if (nZones>1) z2state = dataFile.read();
-        if (nZones>2) z3state = dataFile.read();
-      }
-      dataFile.close();
-    }
-    
-    // Run or stop pumps
-    if (z1state==1) z1.move(30000);
-    if (z2state==1) z2.move(30000);
-    if (z3state==1) z3.move(30000);
-
-    //----- CALCULATE FAN SPEEDS
-    getTimeS(); 
-    // Get correct time and speed points for interpolation
-    
-    while ((dNow.unixtime()-dStart.unixtime())>nextFanTime) {
-      fanFilePos = fanFilePos+NFans+4;
-      dataFile.open("fanspeed.dat", O_READ);
-      if (dataFile.isOpen()) {
-        dataFile.seekSet(fanFilePos);
-        prevFanTime=nextFanTime;
-        nextFanTime=dataFile.read();
-        nextFanTime=nextFanTime+(dataFile.read()*256L);
-        nextFanTime=nextFanTime+(dataFile.read()*65536L);
-        nextFanTime=nextFanTime+(dataFile.read()*16777216L);
-        for (int i = 0; i < NFans; i++) {
-          prevRPM[i]=nextRPM[i];
-          nextRPM[i]=dataFile.read()*10;
-        }
-      }
-      dataFile.close();
-    }
-    interTime=(dNow.unixtime()-dStart.unixtime())-prevFanTime;
-    diffTime=nextFanTime-prevFanTime;
-    for (int i = 0; i < NFans; i++) {    
-      float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
-      targetRPM[i] = (int) target;
-      actualRPM[i] = tachRead(i);
-    }
-    
-    //-----MAKE & SEND ZIGBEE PAYLOAD
-    mPayload[0] = 3; // Master Identifier
-    mPayload[1] = seqCount >> 8 & 0xff;
-    mPayload[2] = seqCount & 0xff;
-    mPayload[3] = seqPeriod/60 >> 8 & 0xff;
-    mPayload[4] = seqPeriod/60 & 0xff;
-    mPayload[5] = seqPos >> 8 & 0xff;
-    mPayload[6] = seqPos & 0xff;
-    mPayload[7] = seqLength >> 8 & 0xff;
-    mPayload[8] = seqLength & 0xff;
-    mPayload[9] = z1state;
-    mPayload[10] = z2state;
-    mPayload[11] = z3state;
-    mPayload[12] = z1speed/10;
-    mPayload[13] = z2speed/10;
-    mPayload[14] = z3speed/10;
-    mPayload[15] = NFans;
-    for (int i = 0; i < NFans; i++) {
-      mPayload[16+i] = actualRPM[i]/10;
-    }
-    
-    // Transmit ZBee mPayload
-    xbee.send(zbTxM);
-    
-    //-----SAVE DATA TO SD CARD
-    dataFile.open(dataFileName, O_WRITE | O_APPEND);  
-    if (dataFile.isOpen()) {
-       dataFile.print(interCount);
-       showString(PSTR(","));
-       dataFile.print(dataTime);
-       showString(PSTR(","));
-       dataFile.print(seqCount);
-       showString(PSTR(","));
-       dataFile.print(seqPos);
-       showString(PSTR(","));
-       dataFile.print(runTime);
-       showString(PSTR(","));
-       dataFile.print(prevFanTime);
-       showString(PSTR(","));
-       dataFile.print(nextFanTime);
-       showString(PSTR(","));
-       dataFile.print(interTime);
-       showString(PSTR(","));
-       dataFile.print(diffTime);
-       for (int i = 0; i < NFans; i++) {
-         showString(PSTR(","));
-         dataFile.print(tachRead(i));
-         showString(PSTR(","));
-         dataFile.print(targetRPM[i]);
-         showString(PSTR(","));
-         dataFile.print(prevRPM[i]);
-         showString(PSTR(","));
-         dataFile.print(nextRPM[i]);
-       }
-       dataFile.println();
-       dataFile.close();
-    }
-    
-    //-----WRITE FAN SPEEDS
-    for (int i = 0; i < NFans; i++) {
-      tachWrite(i,targetRPM[i]);
-    }
-
-    setAlarm();
-    digitalWrite(9, LOW);
-  }  
+  while (processFlag) {
+    z1.runSpeed();
+    z2.runSpeed();
+  }
   
-  z1.run();
-  z2.run();
-  z3.run();
+  z1.stop();
+  z2.stop();
+  
+  do 
+  {
+    z1run=z1.runDeAcc();
+    z2run=z2.runDeAcc();
+  } while (z1run || z2run);
+  
+  RTC.clearAlarm();
+  digitalWrite(9, HIGH);
+  
+  xbee.send(zbTxF);
+  
+  //-----CHECK FOR INSTRUCTIONS
+  xbee.readPacket(5);
+  while (xbee.getResponse().isAvailable() == true) {
+    if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
+      xbee.getResponse().getZBRxResponse(zbRx);
+      if (zbRx.getData(0) == 110) { // Change motor speeds
+        z1speed=zbRx.getData(1)*10;
+        z2speed=zbRx.getData(2)*10;
+        z1.setMaxSpeed(z1speed);
+        z2.setMaxSpeed(z2speed);
+        z1.setAcceleration(z1speed);
+        z2.setAcceleration(z2speed);
+      }
+      else if (zbRx.getData(0) == 109) {
+        resetFunc();  //call reset
+        while (true);
+      }
+    }
+    xbee.readPacket(5); // Check for instructions
+  }
+  
+  //----- SET PUMPS
+  // Read prbs states from SD Card
+  dataFile.open(prbsFileName, O_READ);
+  if (dataFile.isOpen()) {
+    if (dataFile.seekSet(seqPos*nZones)) {
+      z1state = dataFile.read();
+      if (nZones>1) z2state = dataFile.read();
+    }
+    dataFile.close();
+  }
+  else {
+    for (int i = 0; i < 5; i++) { 
+      digitalWrite(9, HIGH);
+      delay(100);
+      digitalWrite(9, LOW);
+      delay(100);
+    }
+  }
+  
+  if (z1state) z1.moveOn();
+  else z1.moveOff();
+  if (z2state) z2.moveOn();
+  else z2.moveOff();
+
+  //----- CALCULATE FAN SPEEDS
+  getTimeS(); 
+  // Get correct time and speed points for interpolation
+  
+  while ((dNow.unixtime()-dStart.unixtime())>nextFanTime) {
+    fanFilePos = fanFilePos+NFans+4;
+    dataFile.open("zfnspeed.dat", O_READ);
+    if (dataFile.isOpen()) {
+      dataFile.seekSet(fanFilePos);
+      prevFanTime=nextFanTime;
+      nextFanTime=dataFile.read();
+      nextFanTime=nextFanTime+(dataFile.read()*256L);
+      nextFanTime=nextFanTime+(dataFile.read()*65536L);
+      nextFanTime=nextFanTime+(dataFile.read()*16777216L);
+      for (int i = 0; i < NFans; i++) {
+        prevRPM[i]=nextRPM[i];
+        nextRPM[i]=dataFile.read()*10;
+      }
+    }
+    dataFile.close();
+  }
+  interTime=(dNow.unixtime()-dStart.unixtime())-prevFanTime;
+  diffTime=nextFanTime-prevFanTime;
+  for (int i = 0; i < NFans; i++) {    
+    float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
+    targetRPM[i] = (int) target;
+    actualRPM[i] = tachRead(i);
+  }
+  
+  voltRaw = analogRead(A1);
+  voltReading = (float) voltRaw/1023*3.3*2;
+  vccRaw = readVcc();
+  vccReading = (float) vccRaw/1000;
+  
+  //-----MAKE & SEND ZIGBEE PAYLOAD
+  mPayload[0] = 3; // Master Identifier
+  mPayload[1] = seqCount >> 8 & 0xff;
+  mPayload[2] = seqCount & 0xff;
+  mPayload[3] = seqPeriod/60 >> 8 & 0xff;
+  mPayload[4] = seqPeriod/60 & 0xff;
+  mPayload[5] = seqPos >> 8 & 0xff;
+  mPayload[6] = seqPos & 0xff;
+  mPayload[7] = seqLength >> 8 & 0xff;
+  mPayload[8] = seqLength & 0xff;
+  mPayload[9] = z1state;
+  mPayload[10] = z2state;
+  mPayload[12] = z1speed/10;
+  mPayload[13] = z2speed/10;
+  mPayload[15] = NFans;
+  for (int i = 0; i < NFans; i++) {
+    mPayload[16+i] = actualRPM[i]/10;
+  }
+  mPayload[28] = voltRaw >> 8 & 0xff;
+  mPayload[29] = voltRaw & 0xff;
+  mPayload[30] = vccRaw >> 8 & 0xff;
+  mPayload[31] = vccRaw & 0xff;
+  
+  
+  // Transmit ZBee mPayload
+  xbee.send(zbTxM);
+  
+  //-----SAVE DATA TO SD CARD
+  dataFile.open(dataFileName, O_WRITE | O_APPEND);  
+  if (dataFile.isOpen()) {
+     dataFile.print(interCount);
+     showString(PSTR(","));
+     dataFile.print(dataTime);
+     showString(PSTR(","));
+     dataFile.print(seqCount);
+     showString(PSTR(","));
+     dataFile.print(seqPos);
+     showString(PSTR(","));
+     dataFile.print(runTime);
+     showString(PSTR(","));
+     dataFile.print(z1state);
+     showString(PSTR(","));
+     dataFile.print(z2state);
+     showString(PSTR(","));
+     dataFile.print(z1speed);
+     showString(PSTR(","));
+     dataFile.print(z2speed);
+     showString(PSTR(","));
+     dataFile.print(prevFanTime);
+     showString(PSTR(","));
+     dataFile.print(nextFanTime);
+     for (int i = 0; i < NFans; i++) {
+       showString(PSTR(","));
+       dataFile.print(tachRead(i));
+       showString(PSTR(","));
+       dataFile.print(targetRPM[i]);
+     }
+     dataFile.println();
+     dataFile.close();
+  }
+  
+  //-----WRITE FAN SPEEDS
+  for (int i = 0; i < NFans; i++) {
+    tachWrite(i,targetRPM[i]);
+  }
+
+  setAlarm();
+  digitalWrite(9, LOW);
+  
+  do 
+  {
+    z1run=z1.runAcc();
+    z2run=z2.runAcc();
+  } while (z1run || z2run);
 }
 
 //------------------------------------------------------------------------------
@@ -424,17 +447,18 @@ void setAlarm(void)
   }
   else seqMultiple=seqMultiple+1;    
   
-  runTime = (seqCount * seqPeriod) + (((seqPos * PRBSmultiple) + seqMultiple) * dT) + 0.5;
+  runTime = (seqCount * seqPeriod) + (((seqPos * PRBSmultiple) + seqMultiple) * dT) + 3.5;
   dAlarm = dStart.unixtime() + runTime;
   
   RTC.setAlarm(dAlarm);
-  processFlag=false;
+  processFlag=true;
   attachInterrupt(0, setProcessFlag, LOW);
 }
 
 void setProcessFlag(void) {
   detachInterrupt(0);
-  processFlag=true;
+  interCount+=1;
+  processFlag=false;
 }
 
 
@@ -500,6 +524,48 @@ int tachRead(int fan)
   }
   result = (long) 60*SR[fan]*8192/count/NP;
   return result;
+}
+
+void dataSend(void)
+{
+  boolean success=0;
+  do {
+    xbee.send(zbTxD);
+    if (xbee.readPacket(500)) {
+      if (xbee.getResponse().getApiId() == ZB_TX_STATUS_RESPONSE) {
+        xbee.getResponse().getZBTxStatusResponse(txStatus);
+        if (txStatus.getDeliveryStatus() == SUCCESS) {
+          success=1;
+        } 
+      }      
+    }
+  } while (success==0);
+}
+
+long readVcc() {
+  long result;
+  // Read 1.1V reference against AVcc
+  ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  delay(2); // Wait for Vref to settle
+  ADCSRA |= _BV(ADSC); // Convert
+  while (bit_is_set(ADCSRA,ADSC));
+  result = ADCL;
+  result |= ADCH<<8;
+  result = 1126400L / result; // Back-calculate AVcc in mV
+  return result;
+}
+
+void flashLed(int pin, int times, int wait) 
+{   
+  for (int i = 0; i < times; i++) {
+    digitalWrite(pin, HIGH);
+    delay(wait);
+    digitalWrite(pin, LOW);
+    
+    if (i + 1 < times) {
+      delay(wait);
+    }
+  }
 }
 
 void showString (PGM_P s) {
