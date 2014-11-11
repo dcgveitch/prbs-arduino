@@ -92,8 +92,8 @@ void setup()
     I2c.write(address,0x02+(i%6),0xe8); // Configure all fans for PWM, 2s Spin Up, with Tach
     I2c.write(address,0x08+(i%6),0x76); // Configure FAN Dynamics
     I2c.write(address,0x60+(i%6),0x40); // Configure FAN Window
-    targetRPM[i]=500;   
-    tachWrite(i,targetRPM[i]);      
+    targetRPM[i]=2500;   
+    tachWrite(i,targetRPM[i]);       
   }  
   
   // Start XBee
