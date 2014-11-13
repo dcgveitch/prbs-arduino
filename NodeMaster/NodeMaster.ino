@@ -22,11 +22,11 @@ XBee xbee = XBee();
 
 uint8_t mPayload[32];
 uint8_t dPayload[70];
-uint8_t flag[1];
+uint8_t fPayload[14];
 XBeeAddress64 addr64 = XBeeAddress64(0x0013A200, 0x40866510); // Comp Address
 ZBTxRequest zbTxM = ZBTxRequest(addr64, mPayload, sizeof(mPayload));
 ZBTxRequest zbTxD = ZBTxRequest(addr64, dPayload, sizeof(dPayload));
-ZBTxRequest zbTxF = ZBTxRequest(addr64, flag, sizeof(flag));
+ZBTxRequest zbTxF = ZBTxRequest(addr64, fPayload, sizeof(fPayload));
 ZBRxResponse zbRx = ZBRxResponse();
 ZBTxStatusResponse txStatus = ZBTxStatusResponse();
 
@@ -99,15 +99,19 @@ void setup()
   // Start XBee
   Serial.begin(9600);
   xbee.begin(Serial);
-  flag[0]=1;
+  fPayload[0]=0;
   
   //-----WAIT FOR INITIALISATION PACKET
   // Wait for Initialisation from coordinator XBee
   while (initialised == false) {
     if (millis()-sleepPoke>1000) {
+      fPayload[1]=NFans;
+      for (int i = 0; i < NFans; i++) {
+        fPayload[i+2] = tachRead(i)/10;
+      }
       xbee.send(zbTxF); // Transmit ready response
       digitalWrite(9, !digitalRead(9)); // Toggle status LED
-      sleepPoke=millis();
+      sleepPoke=millis();     
     }
     
     xbee.readPacket(); // Check for instructions
@@ -230,7 +234,7 @@ void setup()
    
   RTC.initAlarm(dStart); // Initialise RTC alarm
   processFlag=true;
-  flag[0]=2; // Set flag to awake
+  fPayload[0]=2; // Set flag to awake
   attachInterrupt(0, setProcessFlag, LOW);
 }
 //------------------------------------------------------------------------------
