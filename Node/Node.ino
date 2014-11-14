@@ -132,7 +132,7 @@ void setup()
           
           // Send file name in first packet
           dPayload[0]=5; // Data packet identifier
-          for (uint8_t k=1; k<9; k++) dPayload[k]=dir.name[k-1];
+          for (uint8_t k=1; k<9; k++) dPayload[k]=dataFileName[k-1];
           dataSend();
           
           int i=1;
