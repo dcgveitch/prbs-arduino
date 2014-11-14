@@ -109,15 +109,34 @@ void setup()
         // Readout command
         if (zbRx.getData(0) == 103) { // Check first byte for identifier
           uint16_t index = 0;
-          int16_t c;
           dir_t dir;
-          int i=1;
+          long lastFileID = 0;
           
           // read next directory entry
-          while (Fat16::readDir(&dir, &index)) index++;
-          dataFile.open(index-1, O_READ);
+          while (Fat16::readDir(&dir, &index)) {
+            if(dir.name[0]==82) {
+              char strValue[7];
+              for (uint8_t k=1; k<8; k++) {
+                strValue[k-1]=dir.name[k];
+              }
+              if (atol(strValue)>lastFileID) lastFileID=atol(strValue);
+            }   
+            index++;
+          }
           
+          dataN = "R";
+          dataN += lastFileID;
+          dataN.concat(".CSV");
+          dataN.toCharArray(dataFileName,sizeof(dataFileName));
+          dataFile.open(dataFileName, O_READ);
+          
+          // Send file name in first packet
           dPayload[0]=5; // Data packet identifier
+          for (uint8_t k=1; k<9; k++) dPayload[k]=dir.name[k-1];
+          dataSend();
+          
+          int i=1;
+          int16_t c;
           while ((c = dataFile.read()) > 0) {
             dPayload[i]=c;
             i++;
@@ -450,7 +469,7 @@ void dataSend(void)
   boolean success=0;
   do {
     xbee.send(zbTxD);
-    if (xbee.readPacket(500)) {
+    if (xbee.readPacket(1000)) {
       if (xbee.getResponse().getApiId() == ZB_TX_STATUS_RESPONSE) {
         xbee.getResponse().getZBTxStatusResponse(txStatus);
         if (txStatus.getDeliveryStatus() == SUCCESS) {
