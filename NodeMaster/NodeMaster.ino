@@ -223,6 +223,20 @@ void setup()
       targetRPM[i]=prevRPM[i];
       tachWrite(i,targetRPM[i]);
     }
+    // Change release rate for CC Calibration
+    if (targetRPM[0]>1200) {
+      z1speed=600;
+      z2speed=600;
+    }
+    else if (targetRPM[0]>800) {
+      z1speed=400;
+      z2speed=400;
+    }
+    else {
+      z1speed=200;
+      z2speed=200;
+    }
+    
     fanFilePos = NFans+4;
     nextFanTime=dataFile.read();
     nextFanTime=nextFanTime+(dataFile.read()*256L);
@@ -352,9 +366,24 @@ void loop()
   diffTime=nextFanTime-prevFanTime;
   for (int i = 0; i < NFans; i++) {    
     float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
-    targetRPM[i] = (int) target;
+//    targetRPM[i] = (int) target;
+    targetRPM[i] = prevRPM[i]; // Zero order hold for flow test
     actualRPM[i] = tachRead(i);
   }
+  // Change release rate for CC Calibration
+  if (targetRPM[0]>1200) {
+    z1speed=600;
+    z2speed=600;
+  }
+  else if (targetRPM[0]>800) {
+    z1speed=400;
+    z2speed=400;
+  }
+  else {
+    z1speed=200;
+    z2speed=200;
+  }
+  
   
   voltRaw = analogRead(A1);
   voltReading = (float) voltRaw/1023*3.3*2;
