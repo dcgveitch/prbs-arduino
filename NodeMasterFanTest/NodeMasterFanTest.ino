@@ -56,7 +56,7 @@ AccelStepper z2(AccelStepper::DRIVER, 7, 5);
 int z1state=0, z2state=0;
 int z1speed, z2speed;
 long z1pos, z2pos;
-boolean z1run, z2run, warmup;
+boolean z1run, z2run;
 
 
 //------------------------------------------------------------------------------
@@ -78,6 +78,8 @@ void setup()
   digitalWrite(A0, LOW);  
   pinMode(2, INPUT);         // RTC Interrupt to wake from sleep
   pinMode(10, OUTPUT);       // Card Select for SD card
+  pinMode(A2,OUTPUT);     
+  pinMode(A3,OUTPUT);       
   
   // Begin libraries
   I2c.begin();
@@ -132,7 +134,6 @@ void setup()
           dT = seqPeriod / (seqLength*PRBSmultiple);
           z1speed = zbRx.getData(15)*10;
           z2speed = zbRx.getData(16)*10;
-          warmup = zbRx.getData(17);
         }
         // Readout command
         if (zbRx.getData(0) == 103) { // Check first byte for identifier
@@ -222,9 +223,21 @@ void setup()
     dataFile.seekSet(4);
     for (int i = 0; i < NFans; i++) {
       prevRPM[i]=dataFile.read()*10;
-      if (warmup) targetRPM[i] = 2000;
-      else targetRPM[i] = prevRPM[i];
+      targetRPM[i]=prevRPM[i];
       tachWrite(i,targetRPM[i]);
+    }
+    // Change release rate for CC Calibration
+    if (targetRPM[0]>1200) {
+      z1speed=600;
+      z2speed=600;
+    }
+    else if (targetRPM[0]>800) {
+      z1speed=400;
+      z2speed=400;
+    }
+    else {
+      z1speed=200;
+      z2speed=200;
     }
     
     fanFilePos = NFans+4;
@@ -245,6 +258,7 @@ void setup()
       delay(100);
     }
   }
+    
   
   // Setup motor parameters
   z1.setMaxSpeed(z1speed);
@@ -266,16 +280,20 @@ void(* resetFunc) (void) = 0;
 //------------------------------------------------------------------------------
 void loop()
 {
+  digitalWrite(A2, HIGH);
   while (processFlag) {
     z1.runSpeed();
     z2.runSpeed();
   }
+  digitalWrite(A2, LOW);
   
+  digitalWrite(A3, HIGH);
   do 
   {
     z1run=z1.runDeAcc();
     z2run=z2.runDeAcc();
   } while (z1run || z2run);
+  digitalWrite(A3, LOW);
   
   z1pos=z1.currentPosition();
   z2pos=z2.currentPosition();
@@ -310,38 +328,26 @@ void loop()
   
   //----- SET PUMPS
   // Read prbs states from SD Card
-//  dataFile.open(prbsFileName, O_READ);
-//  if (dataFile.isOpen()) {
-//    if (dataFile.seekSet(seqPos*nZones)) {
-//      z1state = dataFile.read();
-//      if (nZones>1) z2state = dataFile.read();
-//    }
-//    dataFile.close();
-//  }
-//  else {
-//    for (int i = 0; i < 5; i++) { 
-//      digitalWrite(9, HIGH);
-//      delay(100);
-//      digitalWrite(9, LOW);
-//      delay(100);
-//    }
-//  }
-  if (seqCount==0) {
-    z1state=1;
-    z2state=0;
-  }
-  else if (seqCount==2) {
-    z1state=0;
-    z2state=1;
+  dataFile.open(prbsFileName, O_READ);
+  if (dataFile.isOpen()) {
+    if (dataFile.seekSet(seqPos*nZones)) {
+      z1state = dataFile.read();
+      if (nZones>1) z2state = dataFile.read();
+    }
+    dataFile.close();
   }
   else {
-    z1state=0;
-    z2state=0;
+    for (int i = 0; i < 5; i++) { 
+      digitalWrite(9, HIGH);
+      delay(100);
+      digitalWrite(9, LOW);
+      delay(100);
+    }
   }
   
-  if (z1state | warmup) z1.moveOn();
+  if (z1state) z1.moveOn();
   else z1.moveOff();
-  if (z2state | warmup) z2.moveOn();
+  if (z2state) z2.moveOn();
   else z2.moveOff();
 
   //----- CALCULATE FAN SPEEDS
@@ -369,11 +375,25 @@ void loop()
   diffTime=nextFanTime-prevFanTime;
   for (int i = 0; i < NFans; i++) {    
     float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
-    if (warmup) targetRPM[i] = 2000;
-    else targetRPM[i] = (int) target;
+//    targetRPM[i] = (int) target;
+    targetRPM[i] = prevRPM[i]; // Zero order hold for flow test
     actualRPM[i] = tachRead(i);
   }
-   
+  // Change release rate for CC Calibration
+  if (targetRPM[0]>1200) {
+    z1speed=600;
+    z2speed=600;
+  }
+  else if (targetRPM[0]>800) {
+    z1speed=400;
+    z2speed=400;
+  }
+  else {
+    z1speed=200;
+    z2speed=200;
+  }
+  
+  
   voltRaw = analogRead(A1);
   voltReading = (float) voltRaw/1023*3.3*2;
   vccRaw = readVcc();

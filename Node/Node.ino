@@ -227,11 +227,13 @@ void loop()
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
       if (zbRx.getData(0) == 102) {        
-        mySerial.print("u " + String((zbRx.getData(1) * 256L) + zbRx.getData(2)) + "\r\n");
+        mySerial.print("F " + String(zbRx.getData(1)) + " 150\r\n");
         delay(2000);
-        mySerial.print("S " + String((zbRx.getData(3) * 256L) + zbRx.getData(4)) + "\r\n");
+      }
+      else if (zbRx.getData(0) == 103) {        
+        mySerial.print("S " + String((zbRx.getData(1) * 256L) + zbRx.getData(2)) + "\r\n");
         delay(2000);
-      }   
+      }  
       else if (zbRx.getData(0) == 109) {
         resetFunc();  //call reset
         while (true);
