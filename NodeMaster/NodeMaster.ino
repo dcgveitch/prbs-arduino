@@ -105,7 +105,7 @@ void setup()
   //-----WAIT FOR INITIALISATION PACKET
   // Wait for Initialisation from coordinator XBee
   while (initialised == false) {
-    if (millis()-sleepPoke>1000) {
+    if (millis()-sleepPoke>3000) {
       fPayload[1]=NFans;
       for (int i = 0; i < NFans; i++) {
         fPayload[i+2] = tachRead(i)/10;
@@ -309,35 +309,39 @@ void loop()
   }
   
   //----- SET PUMPS
-  // Read prbs states from SD Card
-//  dataFile.open(prbsFileName, O_READ);
-//  if (dataFile.isOpen()) {
-//    if (dataFile.seekSet(seqPos*nZones)) {
-//      z1state = dataFile.read();
-//      if (nZones>1) z2state = dataFile.read();
-//    }
-//    dataFile.close();
-//  }
-//  else {
-//    for (int i = 0; i < 5; i++) { 
-//      digitalWrite(9, HIGH);
-//      delay(100);
-//      digitalWrite(9, LOW);
-//      delay(100);
-//    }
-//  }
-  if (seqCount==0) {
-    z1state=1;
-    z2state=0;
-  }
-  else if (seqCount==2) {
-    z1state=0;
-    z2state=1;
+  // OPTION 1 - Read prbs states from SD Card
+  dataFile.open(prbsFileName, O_READ);
+  if (dataFile.isOpen()) {
+    if (dataFile.seekSet(seqPos*nZones)) {
+      z1state = dataFile.read();
+      if (nZones>1) z2state = dataFile.read();
+    }
+    dataFile.close();
   }
   else {
-    z1state=0;
-    z2state=0;
+    for (int i = 0; i < 5; i++) { 
+      digitalWrite(9, HIGH);
+      delay(100);
+      digitalWrite(9, LOW);
+      delay(100);
+    }
   }
+  //////
+  
+  // OPTION 2 - Repeat pump setting based on sequence position for charge up/decay testing
+//  if (seqCount==0) {
+//    z1state=1;
+//    z2state=0;
+//  }
+//  else if (seqCount==2) {
+//    z1state=0;
+//    z2state=1;
+//  }
+//  else {
+//    z1state=0;
+//    z2state=0;
+//  }
+  //////
   
   if (z1state | warmup) z1.moveOn();
   else z1.moveOff();
