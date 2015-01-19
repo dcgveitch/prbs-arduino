@@ -85,7 +85,7 @@ void setup()
   
   // Wait for Initialisation from coordinator XBee
   while (initialised == false) {
-    if (millis()-sleepPoke>1000) {
+    if (millis()-sleepPoke>3000) {
       xbee.send(zbTxF); // Transmit ready response
       digitalWrite(9, !digitalRead(9)); // Toggle status LED
       sleepPoke=millis();
