@@ -227,7 +227,7 @@ void loop()
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
       if (zbRx.getData(0) == 102) {        
-        mySerial.print("F " + String((zbRx.getData(1) * 256L) + zbRx.getData(2)) + " 150\r\n");
+        mySerial.print("F " + String((zbRx.getData(1) * 256L) + zbRx.getData(2)) + " " + String((zbRx.getData(3) * 256L) + zbRx.getData(4)) + "\r\n");
         delay(2000);
       }
       else if (zbRx.getData(0) == 103) {        
