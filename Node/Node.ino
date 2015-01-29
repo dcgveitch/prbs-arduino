@@ -26,11 +26,14 @@ XBee xbee = XBee();
 
 uint8_t mPayload[30];
 uint8_t dPayload[70];
+uint8_t cPayload[5];
 uint8_t flag[1];
-XBeeAddress64 addr64 = XBeeAddress64(0x0013A200, 0x40866510); // Comp Address
-ZBTxRequest zbTxM = ZBTxRequest(addr64, mPayload, sizeof(mPayload));
-ZBTxRequest zbTxD = ZBTxRequest(addr64, dPayload, sizeof(dPayload));
-ZBTxRequest zbTxF = ZBTxRequest(addr64, flag, sizeof(flag));
+XBeeAddress64 addr64C = XBeeAddress64(0x0013A200, 0x40866510); // Comp Address
+XBeeAddress64 addr64M = XBeeAddress64(0x0013A200, 0x40866510); // Master Address
+ZBTxRequest zbTxM = ZBTxRequest(addr64C, mPayload, sizeof(mPayload));
+ZBTxRequest zbTxD = ZBTxRequest(addr64C, dPayload, sizeof(dPayload));
+ZBTxRequest zbTxC = ZBTxRequest(addr64M, cPayload, sizeof(cPayload));
+ZBTxRequest zbTxF = ZBTxRequest(addr64C, flag, sizeof(flag));
 ZBRxResponse zbRx = ZBRxResponse();
 ZBTxStatusResponse txStatus = ZBTxStatusResponse();
 
@@ -40,6 +43,7 @@ long runTime, seqCount=0;
 int PRBSmultiple, seqLength, seqPeriod, seqPos=0, seqMultiple=0, state=0, CO2max=0, CO2seqMin=2001, CO2seqMax=0;
 int nCO2readings, CO2readingSum, pCO2reading, CO2reading, CO2iReadingSum, pCO2iReading, CO2iReading;
 int interCount;
+int nodeRef, decayFlag=0;
 
 // SD Card variables
 SdCard card;
@@ -156,6 +160,13 @@ void setup()
     }
   }
   
+  // Get node reference from SD Card file
+  dataFile.open("NodeRef.dat", O_READ);
+  if (dataFile.isOpen()) {
+    nodeRef=dataFile.read();
+    dataFile.close();
+  }
+    
   //Set up SD card file
   dataN = "R";
   dataN += dStart.unixtime()/60 & 0xffffff;
@@ -279,6 +290,15 @@ void loop()
   if (CO2reading>CO2max) CO2max = CO2reading;
   if (CO2reading>CO2seqMax) CO2seqMax = CO2reading;
   if (CO2reading<CO2seqMin) CO2seqMin = CO2reading;
+  
+  // Tracer gas flags for decay test
+  if (CO2reading>2000) decayFlag=1;
+  if (CO2reading<1000) decayFlag=0;
+
+  // Construct decay flag package to Master Node
+  cPayload[0]=20; // Node decay flay Identifier
+  cPayload[1]=nodeRef; // Node reference number
+  cPayload[2]=decayFlag & 0xff ; // Decay flag
     
   memory = freeMemory();
 
@@ -318,6 +338,8 @@ void loop()
   digitalWrite(A0,LOW);
   delay(250);
   xbee.send(zbTxM);
+  delay(250);
+  xbee.send(zbTxC);
   delay(250);
   digitalWrite(A0,HIGH); // Turn XBee off
   

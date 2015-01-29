@@ -38,6 +38,8 @@ int interCount;
 boolean processFlag;
 int voltRaw, vccRaw;
 float voltReading, vccReading;
+boolean decayFlag[8], z1decay, z2decay;
+int z1decayC, z2decayC;
 
 // SD Card variables
 SdCard card;
@@ -292,7 +294,11 @@ void loop()
   while (xbee.getResponse().isAvailable() == true) {
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
-      if (zbRx.getData(0) == 110) { // Change motor speeds
+      if (zbRx.getData(0) == 109) {
+        resetFunc();  //call reset
+        while (true);
+      }
+      else if (zbRx.getData(0) == 110) { // Change motor speeds
         z1speed=zbRx.getData(1)*10;
         z2speed=zbRx.getData(2)*10;
         z1.setMaxSpeed(z1speed);
@@ -300,48 +306,37 @@ void loop()
         z1.setAcceleration(z1speed);
         z2.setAcceleration(z2speed);
       }
-      else if (zbRx.getData(0) == 109) {
-        resetFunc();  //call reset
-        while (true);
+      else if (zbRx.getData(0) == 120) { // Node Decay flag
+        decayFlag[zbRx.getData(1)]=zbRx.getData(2);
       }
     }
     xbee.readPacket(5); // Check for instructions
   }
   
-  //----- SET PUMPS
-  // OPTION 1 - Read prbs states from SD Card
-  dataFile.open(prbsFileName, O_READ);
-  if (dataFile.isOpen()) {
-    if (dataFile.seekSet(seqPos*nZones)) {
-      z1state = dataFile.read();
-      if (nZones>1) z2state = dataFile.read();
-    }
-    dataFile.close();
-  }
-  else {
-    for (int i = 0; i < 5; i++) { 
-      digitalWrite(9, HIGH);
-      delay(100);
-      digitalWrite(9, LOW);
-      delay(100);
+  //----- SET PUMPS 
+  if (!decayFlag[2] && !decayFlag[3]) { // Both are below 1000ppm
+    z1state=1; 
+    if (z1decay==1) {
+      z1decayC+=1;
+      z1decay=0;
     }
   }
-  //////
+  if (decayFlag[2] && decayFlag[3]) { // Both are above 2000ppm
+    z1state=0;
+    z1decay=1;
+  }
   
-  // OPTION 2 - Repeat pump setting based on sequence position for charge up/decay testing
-//  if (seqCount==0) {
-//    z1state=1;
-//    z2state=0;
-//  }
-//  else if (seqCount==2) {
-//    z1state=0;
-//    z2state=1;
-//  }
-//  else {
-//    z1state=0;
-//    z2state=0;
-//  }
-  //////
+  if (!decayFlag[4] && !decayFlag[5]) {
+    z2state=1;
+    if (z2decay==1) {
+      z2decayC+=1;
+      z2decay=0;
+    }
+  }
+  if (decayFlag[4] && decayFlag[5]) {
+    z2state=0;
+    z2decay=1;
+  }
   
   if (z1state | warmup) z1.moveOn();
   else z1.moveOff();
@@ -352,30 +347,26 @@ void loop()
   getTimeS(); 
   // Get correct time and speed points for interpolation
   
-  while ((dNow.unixtime()-dStart.unixtime())>nextFanTime) {
-    fanFilePos = fanFilePos+NFans+4;
-    dataFile.open("zfnspeed.dat", O_READ);
-    if (dataFile.isOpen()) {
-      dataFile.seekSet(fanFilePos);
-      prevFanTime=nextFanTime;
-      nextFanTime=dataFile.read();
-      nextFanTime=nextFanTime+(dataFile.read()*256L);
-      nextFanTime=nextFanTime+(dataFile.read()*65536L);
-      nextFanTime=nextFanTime+(dataFile.read()*16777216L);
-      for (int i = 0; i < NFans; i++) {
-        prevRPM[i]=nextRPM[i];
-        nextRPM[i]=dataFile.read()*10;
-      }
-    }
-    dataFile.close();
+  if (z1decayC<2) targetRPM[1]=600;
+  else if (z1decayC<4) targetRPM[1]=900;
+  else if (z1decayC<6) targetRPM[1]=1200;
+  else {
+    targetRPM[1]=2000;
+    z1.moveOff();
   }
-  interTime=(dNow.unixtime()-dStart.unixtime())-prevFanTime;
-  diffTime=nextFanTime-prevFanTime;
+  
+  if (z2decayC<2) targetRPM[4]=600;
+  else if (z2decayC<4) targetRPM[4]=900;
+  else if (z2decayC<6) targetRPM[4]=1200;
+  else {
+    targetRPM[4]=2000;
+    z2.moveOff(); // Turn off pump after 3x2 decays
+  }
+  
   for (int i = 0; i < NFans; i++) {    
-    float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
     if (warmup) targetRPM[i] = 2000;
-    else targetRPM[i] = (int) target;
     actualRPM[i] = tachRead(i);
+    tachWrite(i,targetRPM[i]);
   }
    
   voltRaw = analogRead(A1);
@@ -395,11 +386,11 @@ void loop()
   mPayload[8] = seqLength & 0xff;
   mPayload[9] = z1state;
   mPayload[10] = z2state;
-  mPayload[12] = z1speed/10;
-  mPayload[13] = z2speed/10;
+  mPayload[12] = z1decayC;
+  mPayload[13] = z2decayC;
   mPayload[15] = NFans;
   for (int i = 0; i < NFans; i++) {
-    mPayload[16+i] = actualRPM[i]/10;
+    mPayload[16+i] = targetRPM[i]/10;
   }
   mPayload[28] = voltRaw >> 8 & 0xff;
   mPayload[29] = voltRaw & 0xff;
@@ -450,7 +441,7 @@ void loop()
   
   //-----WRITE FAN SPEEDS
   for (int i = 0; i < NFans; i++) {
-    tachWrite(i,targetRPM[i]);
+    
   }
 
   setAlarm();
