@@ -15,7 +15,7 @@
 
 // Clock variables
 RTC_DS3231 RTC;
-DateTime dStart, dAlarm, dNow;
+DateTime dStart, dAlarm, dNow, dChange;
 
 // XBee variables
 XBee xbee = XBee(); 
@@ -125,6 +125,7 @@ void setup()
           dSync =  (zbRx.getData(1) * 16777216L) + (zbRx.getData(2) * 65536L) + (zbRx.getData(3) * 256L) + zbRx.getData(4);
           RTC.adjust(dSync); // Sychronise RTC       
           dStart =  (zbRx.getData(5) * 16777216L) + (zbRx.getData(6) * 65536L) + (zbRx.getData(7) * 256L) + zbRx.getData(8);
+          dChange = dStart;
           seqLength = (zbRx.getData(9) * 256L) + zbRx.getData(10);
           seqPeriod = ((zbRx.getData(11) * 256L) + zbRx.getData(12))*60;
           PRBSmultiple = zbRx.getData(13);
@@ -216,43 +217,10 @@ void setup()
   
   //-----START FANS & GAS RELEASE
   // Set initial fan speed
-  dataFile.open("zfnspeed.dat", O_READ);
-  if (dataFile.isOpen()) {
-    prevFanTime = 0;
-    dataFile.seekSet(4);
-    for (int i = 0; i < NFans; i++) {
-      prevRPM[i]=dataFile.read()*10;
-      if (warmup) targetRPM[i] = 2000;
-      else targetRPM[i] = prevRPM[i];
-      tachWrite(i,targetRPM[i]);
-    }
-    
-    fanFilePos = NFans+4;
-    nextFanTime=dataFile.read();
-    nextFanTime=nextFanTime+(dataFile.read()*256L);
-    nextFanTime=nextFanTime+(dataFile.read()*65536L);
-    nextFanTime=nextFanTime+(dataFile.read()*16777216L);
-    for (int i = 0; i < NFans; i++) {
-      nextRPM[i]=dataFile.read()*10;
-    }
-    dataFile.close();
+  for (int i = 0; i < NFans; i++) {
+    targetRPM[i] = 1000;
+    tachWrite(i,targetRPM[i]);
   }
-  else {
-    for (int i = 0; i < 3; i++) { 
-      digitalWrite(9, HIGH);
-      delay(100);
-      digitalWrite(9, LOW);
-      delay(100);
-    }
-  }
-  
-  // Setup motor parameters
-  z1.setMaxSpeed(z1speed);
-  z2.setMaxSpeed(z2speed);
-  z1.setAcceleration(z1speed);
-  z2.setAcceleration(z2speed);
-  z1.setSpeed(0);
-  z2.setSpeed(0);
    
   RTC.initAlarm(dStart); // Initialise RTC alarm
   processFlag=true;
@@ -265,23 +233,7 @@ void(* resetFunc) (void) = 0;
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 void loop()
-{
-  while (processFlag) {
-    z1.runSpeed();
-    z2.runSpeed();
-  }
-  
-  do 
-  {
-    z1run=z1.runDeAcc();
-    z2run=z2.runDeAcc();
-  } while (z1run || z2run);
-  
-  z1pos=z1.currentPosition();
-  z2pos=z2.currentPosition();
-  z1.setCurrentPosition(0);
-  z2.setCurrentPosition(0);  
-  
+{ 
   RTC.clearAlarm();
   digitalWrite(9, HIGH);
   
@@ -292,14 +244,6 @@ void loop()
   while (xbee.getResponse().isAvailable() == true) {
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
-      if (zbRx.getData(0) == 110) { // Change motor speeds
-        z1speed=zbRx.getData(1)*10;
-        z2speed=zbRx.getData(2)*10;
-        z1.setMaxSpeed(z1speed);
-        z2.setMaxSpeed(z2speed);
-        z1.setAcceleration(z1speed);
-        z2.setAcceleration(z2speed);
-      }
       else if (zbRx.getData(0) == 109) {
         resetFunc();  //call reset
         while (true);
@@ -308,74 +252,22 @@ void loop()
     xbee.readPacket(5); // Check for instructions
   }
   
-  //----- SET PUMPS
-  // OPTION 1 - Read prbs states from SD Card
-  dataFile.open(prbsFileName, O_READ);
-  if (dataFile.isOpen()) {
-    if (dataFile.seekSet(seqPos*nZones)) {
-      z1state = dataFile.read();
-      if (nZones>1) z2state = dataFile.read();
-    }
-    dataFile.close();
-  }
-  else {
-    for (int i = 0; i < 5; i++) { 
-      digitalWrite(9, HIGH);
-      delay(100);
-      digitalWrite(9, LOW);
-      delay(100);
-    }
-  }
-  //////
-  
-  // OPTION 2 - Repeat pump setting based on sequence position for charge up/decay testing
-//  if (seqCount==0) {
-//    z1state=1;
-//    z2state=0;
-//  }
-//  else if (seqCount==2) {
-//    z1state=0;
-//    z2state=1;
-//  }
-//  else {
-//    z1state=0;
-//    z2state=0;
-//  }
-  //////
-  
-  if (z1state | warmup) z1.moveOn();
-  else z1.moveOff();
-  if (z2state | warmup) z2.moveOn();
-  else z2.moveOff();
 
   //----- CALCULATE FAN SPEEDS
   getTimeS(); 
   // Get correct time and speed points for interpolation
   
-  while ((dNow.unixtime()-dStart.unixtime())>nextFanTime) {
-    fanFilePos = fanFilePos+NFans+4;
-    dataFile.open("zfnspeed.dat", O_READ);
-    if (dataFile.isOpen()) {
-      dataFile.seekSet(fanFilePos);
-      prevFanTime=nextFanTime;
-      nextFanTime=dataFile.read();
-      nextFanTime=nextFanTime+(dataFile.read()*256L);
-      nextFanTime=nextFanTime+(dataFile.read()*65536L);
-      nextFanTime=nextFanTime+(dataFile.read()*16777216L);
-      for (int i = 0; i < NFans; i++) {
-        prevRPM[i]=nextRPM[i];
-        nextRPM[i]=dataFile.read()*10;
-      }
+  // Fan ramp between 200 & 1800rpm in 25rpm steps every 3 minutes
+  if ((dNow.unixtime()-dChange.unixtime())>175) {
+    for (int i = 0; i < NFans; i++) {
+      prevRPM[i] = targetRPM[i];
+      actualRPM[i] = tachRead(i); 
+      if (targetRPM[i] >= 1800) changeRPM=-25;
+      if (targetRPM[i] <= 200) changeRPM=25;
+      targetRPM[i] = targetRPM[i] + changeRPM;
+      tachWrite(i,targetRPM[i]);
     }
-    dataFile.close();
-  }
-  interTime=(dNow.unixtime()-dStart.unixtime())-prevFanTime;
-  diffTime=nextFanTime-prevFanTime;
-  for (int i = 0; i < NFans; i++) {    
-    float target = prevRPM[i]+(nextRPM[i]-prevRPM[i])*(float(interTime)/diffTime);
-    if (warmup) targetRPM[i] = 2000;
-    else targetRPM[i] = (int) target;
-    actualRPM[i] = tachRead(i);
+    dChange=Now;
   }
    
   voltRaw = analogRead(A1);
@@ -393,10 +285,6 @@ void loop()
   mPayload[6] = seqPos & 0xff;
   mPayload[7] = seqLength >> 8 & 0xff;
   mPayload[8] = seqLength & 0xff;
-  mPayload[9] = z1state;
-  mPayload[10] = z2state;
-  mPayload[12] = z1speed/10;
-  mPayload[13] = z2speed/10;
   mPayload[15] = NFans;
   for (int i = 0; i < NFans; i++) {
     mPayload[16+i] = actualRPM[i]/10;
@@ -422,44 +310,17 @@ void loop()
      dataFile.print(seqPos);
      showString(PSTR(","));
      dataFile.print(runTime);
-     showString(PSTR(","));
-     dataFile.print(z1state);
-     showString(PSTR(","));
-     dataFile.print(z2state);
-     showString(PSTR(","));
-     dataFile.print(z1speed);
-     showString(PSTR(","));
-     dataFile.print(z2speed);
-     showString(PSTR(","));
-     dataFile.print(z1pos);
-     showString(PSTR(","));
-     dataFile.print(z2pos);
-     showString(PSTR(","));
-     dataFile.print(prevFanTime);
-     showString(PSTR(","));
-     dataFile.print(nextFanTime);
      for (int i = 0; i < NFans; i++) {
        showString(PSTR(","));
-       dataFile.print(tachRead(i));
+       dataFile.print(prevRPM[i]);
        showString(PSTR(","));
-       dataFile.print(targetRPM[i]);
+       dataFile.print(actualRPM[i]);
      }
      dataFile.println();
      dataFile.close();
   }
-  
-  //-----WRITE FAN SPEEDS
-  for (int i = 0; i < NFans; i++) {
-    tachWrite(i,targetRPM[i]);
-  }
 
   setAlarm();
-  
-  do 
-  {
-    z1run=z1.runAcc();
-    z2run=z2.runAcc();
-  } while (z1run || z2run);
   
   digitalWrite(9, LOW);
 }
