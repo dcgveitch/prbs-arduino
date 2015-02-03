@@ -49,6 +49,7 @@ String dataTime, prbsData;
 // Fan variables
 int targetRPM[NFans], actualRPM[NFans], prevRPM[NFans], nextRPM[NFans], SR[NFans];
 long prevFanTime, nextFanTime, interTime, diffTime, fanFilePos;
+int changeRPM;
 
 // Motor variables
 AccelStepper z1(AccelStepper::DRIVER, 8, 5);
@@ -222,6 +223,7 @@ void setup()
     tachWrite(i,targetRPM[i]);
   }
    
+  changeRPM=100; 
   RTC.initAlarm(dStart); // Initialise RTC alarm
   processFlag=true;
   fPayload[0]=2; // Set flag to awake
@@ -234,6 +236,11 @@ void(* resetFunc) (void) = 0;
 //------------------------------------------------------------------------------
 void loop()
 { 
+  while (processFlag) {
+    z1.runSpeed();
+    z2.runSpeed();
+  }
+  
   RTC.clearAlarm();
   digitalWrite(9, HIGH);
   
@@ -244,7 +251,7 @@ void loop()
   while (xbee.getResponse().isAvailable() == true) {
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
-      else if (zbRx.getData(0) == 109) {
+      if (zbRx.getData(0) == 109) {
         resetFunc();  //call reset
         while (true);
       }
@@ -254,20 +261,19 @@ void loop()
   
 
   //----- CALCULATE FAN SPEEDS
-  getTimeS(); 
-  // Get correct time and speed points for interpolation
+  getTimeS();  // Get correct time and speed points for interpolation
   
   // Fan ramp between 200 & 1800rpm in 25rpm steps every 3 minutes
-  if ((dNow.unixtime()-dChange.unixtime())>175) {
+  if (dNow.unixtime()-dChange.unixtime()>25) {
     for (int i = 0; i < NFans; i++) {
       prevRPM[i] = targetRPM[i];
       actualRPM[i] = tachRead(i); 
-      if (targetRPM[i] >= 1800) changeRPM=-25;
-      if (targetRPM[i] <= 200) changeRPM=25;
+      if (targetRPM[i] >= 1800) changeRPM=-100;
+      if (targetRPM[i] <= 200) changeRPM=100;
       targetRPM[i] = targetRPM[i] + changeRPM;
       tachWrite(i,targetRPM[i]);
     }
-    dChange=Now;
+    dChange=dNow;
   }
    
   voltRaw = analogRead(A1);
@@ -287,7 +293,7 @@ void loop()
   mPayload[8] = seqLength & 0xff;
   mPayload[15] = NFans;
   for (int i = 0; i < NFans; i++) {
-    mPayload[16+i] = actualRPM[i]/10;
+    mPayload[16+i] = targetRPM[i]/10;
   }
   mPayload[28] = voltRaw >> 8 & 0xff;
   mPayload[29] = voltRaw & 0xff;
