@@ -60,6 +60,8 @@ int z1speed, z2speed;
 long z1pos, z2pos;
 boolean z1run, z2run, warmup;
 
+int testPacket, testPacketCount;
+
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -95,7 +97,7 @@ void setup()
     I2c.write(address,0x02+(i%6),0xe8); // Configure all fans for PWM, 2s Spin Up, with Tach
     I2c.write(address,0x08+(i%6),0x76); // Configure FAN Dynamics
     I2c.write(address,0x60+(i%6),0x40); // Configure FAN Window
-    targetRPM[i]=2500;   
+    targetRPM[i]=2000;   
     tachWrite(i,targetRPM[i]);       
   }  
   
@@ -214,39 +216,7 @@ void setup()
   dataFile.println(nZones);
   dataFile.println();
   showString(PSTR("Interrupt,Timestamp,SeqCount,SeqPosition,RunTime,z1State,z2State,z1Speed,z2Speed,z1Pos,z2Pos,PrevFanTime,NextFanTime,Tach,Target\r\n"));
-  dataFile.close();
-  
-  //-----START FANS & GAS RELEASE
-  // Set initial fan speed
-  dataFile.open("zfnspeed.dat", O_READ);
-  if (dataFile.isOpen()) {
-    prevFanTime = 0;
-    dataFile.seekSet(4);
-    for (int i = 0; i < NFans; i++) {
-      prevRPM[i]=dataFile.read()*10;
-      if (warmup) targetRPM[i] = 2000;
-      else targetRPM[i] = prevRPM[i];
-      tachWrite(i,targetRPM[i]);
-    }
-    
-    fanFilePos = NFans+4;
-    nextFanTime=dataFile.read();
-    nextFanTime=nextFanTime+(dataFile.read()*256L);
-    nextFanTime=nextFanTime+(dataFile.read()*65536L);
-    nextFanTime=nextFanTime+(dataFile.read()*16777216L);
-    for (int i = 0; i < NFans; i++) {
-      nextRPM[i]=dataFile.read()*10;
-    }
-    dataFile.close();
-  }
-  else {
-    for (int i = 0; i < 3; i++) { 
-      digitalWrite(9, HIGH);
-      delay(100);
-      digitalWrite(9, LOW);
-      delay(100);
-    }
-  }
+  dataFile.close(); 
   
   // Setup motor parameters
   z1.setMaxSpeed(z1speed);
@@ -255,7 +225,7 @@ void setup()
   z2.setAcceleration(z2speed);
   z1.setSpeed(0);
   z2.setSpeed(0);
-   
+  
   RTC.initAlarm(dStart); // Initialise RTC alarm
   processFlag=true;
   fPayload[0]=2; // Set flag to awake
@@ -288,10 +258,11 @@ void loop()
   digitalWrite(9, HIGH);
   
   xbee.send(zbTxF);
+  testPacketCount=0;
   
   //-----CHECK FOR INSTRUCTIONS
-  xbee.readPacket(5);
-  while (xbee.getResponse().isAvailable() == true) {
+  testPacket=xbee.readPacket(500);
+  while (xbee.getResponse().isAvailable()) {
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
       if (zbRx.getData(0) == 109) {
@@ -306,11 +277,12 @@ void loop()
         z1.setAcceleration(z1speed);
         z2.setAcceleration(z2speed);
       }
-      else if (zbRx.getData(0) == 120) { // Node Decay flag
+      else if (zbRx.getData(0) == 20) { // Node Decay flag
         decayFlag[zbRx.getData(1)]=zbRx.getData(2);
+        testPacketCount+=1;
       }
     }
-    xbee.readPacket(5); // Check for instructions
+    xbee.readPacket(500);
   }
   
   //----- SET PUMPS 
@@ -386,6 +358,7 @@ void loop()
   mPayload[8] = seqLength & 0xff;
   mPayload[9] = z1state;
   mPayload[10] = z2state;
+  mPayload[11] = testPacketCount;
   mPayload[12] = z1decayC;
   mPayload[13] = z2decayC;
   mPayload[15] = NFans;
@@ -488,7 +461,7 @@ void setAlarm(void)
   }
   else seqMultiple=seqMultiple+1;    
   
-  runTime = (seqCount * seqPeriod) + (((seqPos * PRBSmultiple) + seqMultiple) * dT) + 3.5;
+  runTime = (seqCount * seqPeriod) + (((seqPos * PRBSmultiple) + seqMultiple) * dT);
   dAlarm = dStart.unixtime() + runTime;
   
   RTC.setAlarm(dAlarm);

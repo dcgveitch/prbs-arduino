@@ -29,7 +29,7 @@ uint8_t dPayload[70];
 uint8_t cPayload[5];
 uint8_t flag[1];
 XBeeAddress64 addr64C = XBeeAddress64(0x0013A200, 0x40866510); // Comp Address
-XBeeAddress64 addr64M = XBeeAddress64(0x0013A200, 0x40866510); // Master Address
+XBeeAddress64 addr64M = XBeeAddress64(0x0013A200, 0x4086647A); // Master Address
 ZBTxRequest zbTxM = ZBTxRequest(addr64C, mPayload, sizeof(mPayload));
 ZBTxRequest zbTxD = ZBTxRequest(addr64C, dPayload, sizeof(dPayload));
 ZBTxRequest zbTxC = ZBTxRequest(addr64M, cPayload, sizeof(cPayload));
@@ -231,6 +231,7 @@ void loop()
   digitalWrite(9, LOW);
   xbee.send(zbTxF);
   delay(250);
+  decaySend();
   
   // Check for instructions
   xbee.readPacket(500);
@@ -338,8 +339,6 @@ void loop()
   digitalWrite(A0,LOW);
   delay(250);
   xbee.send(zbTxM);
-  delay(250);
-  xbee.send(zbTxC);
   delay(250);
   digitalWrite(A0,HIGH); // Turn XBee off
   
@@ -495,6 +494,22 @@ void dataSend(void)
   boolean success=0;
   do {
     xbee.send(zbTxD);
+    if (xbee.readPacket(1000)) {
+      if (xbee.getResponse().getApiId() == ZB_TX_STATUS_RESPONSE) {
+        xbee.getResponse().getZBTxStatusResponse(txStatus);
+        if (txStatus.getDeliveryStatus() == SUCCESS) {
+          success=1;
+        } 
+      }      
+    }
+  } while (success==0);
+}
+
+void decaySend(void)
+{
+  boolean success=0;
+  do {
+    xbee.send(zbTxC);
     if (xbee.readPacket(1000)) {
       if (xbee.getResponse().getApiId() == ZB_TX_STATUS_RESPONSE) {
         xbee.getResponse().getZBTxStatusResponse(txStatus);
