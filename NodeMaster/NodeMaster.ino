@@ -267,7 +267,6 @@ void loop()
   if (dNow.unixtime()-dChange.unixtime()>175) {
     for (int i = 0; i < NFans; i++) {
       prevRPM[i] = targetRPM[i];
-      actualRPM[i] = tachRead(i); 
       if (targetRPM[i] >= 1800) changeRPM=-25;
       if (targetRPM[i] <= 200) changeRPM=25;
       targetRPM[i] = targetRPM[i] + changeRPM;
@@ -280,6 +279,10 @@ void loop()
   voltReading = (float) voltRaw/1023*3.3*2;
   vccRaw = readVcc();
   vccReading = (float) vccRaw/1000;
+  
+  for (int i = 0; i < NFans; i++) {
+    actualRPM[i] = tachRead(i);
+  }
   
   //-----MAKE & SEND ZIGBEE PAYLOAD
   mPayload[0] = 3; // Master Identifier
