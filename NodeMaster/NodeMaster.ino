@@ -223,7 +223,7 @@ void setup()
     tachWrite(i,targetRPM[i]);
   }
    
-  changeRPM=100; 
+  changeRPM=25; // Start with fans increasing
   RTC.initAlarm(dStart); // Initialise RTC alarm
   processFlag=true;
   fPayload[0]=2; // Set flag to awake
@@ -264,12 +264,12 @@ void loop()
   getTimeS();  // Get correct time and speed points for interpolation
   
   // Fan ramp between 200 & 1800rpm in 25rpm steps every 3 minutes
-  if (dNow.unixtime()-dChange.unixtime()>25) {
+  if (dNow.unixtime()-dChange.unixtime()>175) {
     for (int i = 0; i < NFans; i++) {
       prevRPM[i] = targetRPM[i];
       actualRPM[i] = tachRead(i); 
-      if (targetRPM[i] >= 1800) changeRPM=-100;
-      if (targetRPM[i] <= 200) changeRPM=100;
+      if (targetRPM[i] >= 1800) changeRPM=-25;
+      if (targetRPM[i] <= 200) changeRPM=25;
       targetRPM[i] = targetRPM[i] + changeRPM;
       tachWrite(i,targetRPM[i]);
     }
@@ -293,7 +293,7 @@ void loop()
   mPayload[8] = seqLength & 0xff;
   mPayload[15] = NFans;
   for (int i = 0; i < NFans; i++) {
-    mPayload[16+i] = targetRPM[i]/10;
+    mPayload[16+i] = actualRPM[i]/10;
   }
   mPayload[28] = voltRaw >> 8 & 0xff;
   mPayload[29] = voltRaw & 0xff;
