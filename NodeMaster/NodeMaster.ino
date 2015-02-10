@@ -286,26 +286,26 @@ void loop()
   }
   
   //----- SET PUMPS 
-  if (!decayFlag[2] && !decayFlag[3]) { // Both are below 1000ppm
+  if (!decayFlag[2]) { // Zone is below 1000ppm
     z1state=1; 
     if (z1decay==1) {
       z1decayC+=1;
       z1decay=0;
     }
   }
-  if (decayFlag[2] && decayFlag[3]) { // Both are above 2000ppm
+  if (decayFlag[2]) { // Zone is above 2000ppm
     z1state=0;
     z1decay=1;
   }
   
-  if (!decayFlag[4] && !decayFlag[5]) {
+  if (!decayFlag[4]) {
     z2state=1;
     if (z2decay==1) {
       z2decayC+=1;
       z2decay=0;
     }
   }
-  if (decayFlag[4] && decayFlag[5]) {
+  if (decayFlag[4]) {
     z2state=0;
     z2decay=1;
   }
@@ -319,19 +319,19 @@ void loop()
   getTimeS(); 
   // Get correct time and speed points for interpolation
   
-  if (z1decayC<2) targetRPM[1]=600;
-  else if (z1decayC<4) targetRPM[1]=900;
-  else if (z1decayC<6) targetRPM[1]=1200;
+  if (z1decayC<2) targetRPM[0]=600;
+  else if (z1decayC<4) targetRPM[0]=900;
+  else if (z1decayC<6) targetRPM[0]=1200;
   else {
-    targetRPM[1]=2000;
+    targetRPM[0]=2000;
     z1.moveOff();
   }
   
-  if (z2decayC<2) targetRPM[4]=600;
-  else if (z2decayC<4) targetRPM[4]=900;
-  else if (z2decayC<6) targetRPM[4]=1200;
+  if (z2decayC<2) targetRPM[3]=600;
+  else if (z2decayC<4) targetRPM[3]=900;
+  else if (z2decayC<6) targetRPM[3]=1200;
   else {
-    targetRPM[4]=2000;
+    targetRPM[3]=2000;
     z2.moveOff(); // Turn off pump after 3x2 decays
   }
   
