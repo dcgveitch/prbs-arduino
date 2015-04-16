@@ -231,7 +231,7 @@ void loop()
   digitalWrite(9, LOW);
   xbee.send(zbTxF);
   delay(250);
-  decaySend();
+  xbee.send(zbTxC);
   
   // Check for instructions
   xbee.readPacket(500);
@@ -494,22 +494,6 @@ void dataSend(void)
   boolean success=0;
   do {
     xbee.send(zbTxD);
-    if (xbee.readPacket(1000)) {
-      if (xbee.getResponse().getApiId() == ZB_TX_STATUS_RESPONSE) {
-        xbee.getResponse().getZBTxStatusResponse(txStatus);
-        if (txStatus.getDeliveryStatus() == SUCCESS) {
-          success=1;
-        } 
-      }      
-    }
-  } while (success==0);
-}
-
-void decaySend(void)
-{
-  boolean success=0;
-  do {
-    xbee.send(zbTxC);
     if (xbee.readPacket(1000)) {
       if (xbee.getResponse().getApiId() == ZB_TX_STATUS_RESPONSE) {
         xbee.getResponse().getZBTxStatusResponse(txStatus);
