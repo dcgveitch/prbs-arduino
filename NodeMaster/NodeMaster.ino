@@ -20,7 +20,7 @@ DateTime dStart, dAlarm, dNow;
 // XBee variables
 XBee xbee = XBee(); 
 
-uint8_t mPayload[32];
+uint8_t mPayload[34];
 uint8_t dPayload[70];
 uint8_t fPayload[14];
 XBeeAddress64 addr64 = XBeeAddress64(0x0013A200, 0x40866510); // Comp Address
@@ -38,7 +38,7 @@ int interCount;
 boolean processFlag;
 int voltRaw, vccRaw;
 float voltReading, vccReading;
-boolean decayFlag[8], z1decay, z2decay;
+boolean decayFlag[2], z1decay, z2decay;
 int z1decayC, z2decayC;
 
 // SD Card variables
@@ -57,11 +57,12 @@ AccelStepper z1(AccelStepper::DRIVER, 8, 5);
 AccelStepper z2(AccelStepper::DRIVER, 7, 5); 
 int z1state=0, z2state=0;
 int z1speed, z2speed;
-long z1pos, z2pos;
+long z1pos[3], z2pos[3];
 boolean z1run, z2run, warmup;
 
-int testPacket, testPacketCount;
-
+int testPacket, decayFlagCount, testPacketError;
+int timerDB[10];
+long timerProc, timerRun;
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -97,7 +98,7 @@ void setup()
     I2c.write(address,0x02+(i%6),0xe8); // Configure all fans for PWM, 2s Spin Up, with Tach
     I2c.write(address,0x08+(i%6),0x76); // Configure FAN Dynamics
     I2c.write(address,0x60+(i%6),0x40); // Configure FAN Window
-    targetRPM[i]=2000;   
+    targetRPM[i]=1100;   
     tachWrite(i,targetRPM[i]);       
   }  
   
@@ -242,6 +243,9 @@ void loop()
     z1.runSpeed();
     z2.runSpeed();
   }
+  timerDB[0]=millis()-timerRun;
+  z1pos[1]=z1.currentPosition();
+  z2pos[1]=z2.currentPosition();
   
   do 
   {
@@ -249,19 +253,29 @@ void loop()
     z2run=z2.runDeAcc();
   } while (z1run || z2run);
   
-  z1pos=z1.currentPosition();
-  z2pos=z2.currentPosition();
+  timerDB[1]=millis()-timerRun;
+  timerProc=millis();
+  
+  z1pos[2]=z1.currentPosition();
+  z2pos[2]=z2.currentPosition();
   z1.setCurrentPosition(0);
   z2.setCurrentPosition(0);  
   
   RTC.clearAlarm();
-  digitalWrite(9, HIGH);
   
   xbee.send(zbTxF);
-  testPacketCount=0;
+  digitalWrite(9, HIGH);
   
+  decayFlagCount=0;
+  boolean decayFlagRec[] ={0 , 0};
+  timerDB[2]=millis()-timerProc;
   //-----CHECK FOR INSTRUCTIONS
-  testPacket=xbee.readPacket(500);
+  testPacket=xbee.readPacket(1000);
+  delay(7);
+  while (testPacketError=xbee.getResponse().isError()) {
+    testPacket=xbee.readPacket(1000);
+    delay(7);
+  }
   while (xbee.getResponse().isAvailable()) {
     if (xbee.getResponse().getApiId() == ZB_RX_RESPONSE) {
       xbee.getResponse().getZBRxResponse(zbRx);
@@ -279,67 +293,89 @@ void loop()
       }
       else if (zbRx.getData(0) == 20) { // Node Decay flag
         decayFlag[zbRx.getData(1)]=zbRx.getData(2);
-        testPacketCount+=1;
+        decayFlagRec[zbRx.getData(1)]=1;
+        decayFlagCount+=1;
       }
     }
-    xbee.readPacket(500);
+    testPacket=xbee.readPacket(1000);
+    delay(7);
+    while (testPacketError=xbee.getResponse().isError()) {      
+      testPacket=xbee.readPacket(1000);
+      delay(7);
+    }
   }
+  timerDB[3]=millis()-timerProc;
+  digitalWrite(9, LOW);
   
-  //----- SET PUMPS 
-  if (!decayFlag[2]) { // Zone is below 1000ppm
+  
+  //----- CALCULATE PUMPS 
+  if (!decayFlag[0]) { // Zone is below 1000ppm
     z1state=1; 
     if (z1decay==1) {
       z1decayC+=1;
       z1decay=0;
     }
   }
-  if (decayFlag[2]) { // Zone is above 2000ppm
+  if (decayFlag[0]) { // Zone is above 2000ppm
     z1state=0;
     z1decay=1;
   }
   
-  if (!decayFlag[4]) {
+  if (!decayFlag[1]) {
     z2state=1;
     if (z2decay==1) {
       z2decayC+=1;
       z2decay=0;
     }
   }
-  if (decayFlag[4]) {
+  if (decayFlag[1]) {
     z2state=0;
     z2decay=1;
   }
   
+  timerDB[4]=millis()-timerProc;
+  
+   //----- CALCULATE FAN SPEEDS
+  getTimeS(); 
+  // Get correct time and speed points for interpolation
+  
+  if (z1decayC<2) targetRPM[0]=395;
+  else if (z1decayC<4) targetRPM[0]=585;
+  else if (z1decayC<6) targetRPM[0]=775;
+  else if (z1decayC<8) targetRPM[0]=965;
+  else if (z1decayC<10) targetRPM[0]=1155;
+  else {
+    targetRPM[0]=2000; // Turn off pump after 3x2 decays
+    z1state=0; 
+  }
+  if (z1state==1) targetRPM[0]=395; // Turn off fan if charging
+  
+  if (z2decayC<2) targetRPM[3]=395;
+  else if (z2decayC<4) targetRPM[3]=585;
+  else if (z2decayC<6) targetRPM[3]=775;
+  else if (z2decayC<8) targetRPM[3]=965;
+  else if (z2decayC<10) targetRPM[3]=1155;
+  else {
+    targetRPM[3]=2000;
+    z2state=0; 
+  }
+  if (z2state==1) targetRPM[3]=395; 
+    
+  
+  for (int i = 0; i < NFans; i++) {    
+    if (!warmup) tachWrite(i,targetRPM[i]);
+    actualRPM[i] = tachRead(i);
+  }
+  
+  timerDB[5]=millis()-timerProc;
+  
+  //----- TURN ON/OFF PUMPS
   if (z1state | warmup) z1.moveOn();
   else z1.moveOff();
   if (z2state | warmup) z2.moveOn();
   else z2.moveOff();
-
-  //----- CALCULATE FAN SPEEDS
-  getTimeS(); 
-  // Get correct time and speed points for interpolation
   
-  if (z1decayC<2) targetRPM[0]=600;
-  else if (z1decayC<4) targetRPM[0]=900;
-  else if (z1decayC<6) targetRPM[0]=1200;
-  else {
-    targetRPM[0]=2000;
-    z1.moveOff();
-  }
-  
-  if (z2decayC<2) targetRPM[3]=600;
-  else if (z2decayC<4) targetRPM[3]=900;
-  else if (z2decayC<6) targetRPM[3]=1200;
-  else {
-    targetRPM[3]=2000;
-    z2.moveOff(); // Turn off pump after 3x2 decays
-  }
-  
-  for (int i = 0; i < NFans; i++) {    
-    if (warmup) targetRPM[i] = 2000;
-    actualRPM[i] = tachRead(i);
-    tachWrite(i,targetRPM[i]);
-  }
+  timerDB[6]=millis()-timerProc;
    
   voltRaw = analogRead(A1);
   voltReading = (float) voltRaw/1023*3.3*2;
@@ -358,21 +394,23 @@ void loop()
   mPayload[8] = seqLength & 0xff;
   mPayload[9] = z1state;
   mPayload[10] = z2state;
-  mPayload[11] = testPacketCount;
-  mPayload[12] = z1decayC;
-  mPayload[13] = z2decayC;
-  mPayload[15] = NFans;
+  mPayload[11] = decayFlagCount;
+  mPayload[12] = z1speed/10;
+  mPayload[13] = z2speed/10;
+  mPayload[15] = z1decayC;
+  mPayload[16] = z2decayC;
+  mPayload[17] = NFans;
   for (int i = 0; i < NFans; i++) {
-    mPayload[16+i] = targetRPM[i]/10;
+    mPayload[18+i] = targetRPM[i]/10;
   }
-  mPayload[28] = voltRaw >> 8 & 0xff;
-  mPayload[29] = voltRaw & 0xff;
-  mPayload[30] = vccRaw >> 8 & 0xff;
-  mPayload[31] = vccRaw & 0xff;
-  
+  mPayload[30] = voltRaw >> 8 & 0xff;
+  mPayload[31] = voltRaw & 0xff;
+  mPayload[32] = vccRaw >> 8 & 0xff;
+  mPayload[33] = vccRaw & 0xff;
   
   // Transmit ZBee mPayload
   xbee.send(zbTxM);
+  timerDB[7]=millis()-timerProc;
   
   //-----SAVE DATA TO SD CARD
   dataFile.open(dataFileName, O_WRITE | O_APPEND);  
@@ -381,11 +419,35 @@ void loop()
      showString(PSTR(","));
      dataFile.print(dataTime);
      showString(PSTR(","));
-     dataFile.print(seqCount);
+     // Debug Timers
+     dataFile.print(timerDB[0]);
      showString(PSTR(","));
-     dataFile.print(seqPos);
+     dataFile.print(timerDB[1]);
      showString(PSTR(","));
+     dataFile.print(timerDB[2]);
+     showString(PSTR(","));
+     dataFile.print(timerDB[3]);
+     showString(PSTR(","));
+     dataFile.print(timerDB[4]);
+     showString(PSTR(","));
+     dataFile.print(timerDB[5]);
+     showString(PSTR(","));
+     dataFile.print(timerDB[6]);
+     showString(PSTR(","));
+     dataFile.print(timerDB[7]);
+     showString(PSTR(","));
+     dataFile.print(timerDB[8]);
+     showString(PSTR(","));
+     dataFile.print(timerDB[9]);
+     showString(PSTR(","));
+     // End Timers     
      dataFile.print(runTime);
+     showString(PSTR(","));
+     dataFile.print(decayFlagRec[0]);
+     dataFile.print(decayFlag[0]);
+     showString(PSTR(","));
+     dataFile.print(decayFlagRec[1]);
+     dataFile.print(decayFlag[1]);
      showString(PSTR(","));
      dataFile.print(z1state);
      showString(PSTR(","));
@@ -395,9 +457,17 @@ void loop()
      showString(PSTR(","));
      dataFile.print(z2speed);
      showString(PSTR(","));
-     dataFile.print(z1pos);
+     dataFile.print(z1pos[0]);
      showString(PSTR(","));
-     dataFile.print(z2pos);
+     dataFile.print(z2pos[0]);
+     showString(PSTR(","));
+     dataFile.print(z1pos[1]);
+     showString(PSTR(","));
+     dataFile.print(z2pos[1]);
+     showString(PSTR(","));
+     dataFile.print(z1pos[2]);
+     showString(PSTR(","));
+     dataFile.print(z2pos[2]);
      showString(PSTR(","));
      dataFile.print(prevFanTime);
      showString(PSTR(","));
@@ -412,20 +482,23 @@ void loop()
      dataFile.close();
   }
   
-  //-----WRITE FAN SPEEDS
-  for (int i = 0; i < NFans; i++) {
-    
-  }
-
   setAlarm();
+  flashLed(9, decayFlagCount,50);
+  flashLed(9, z1state,250);
+  flashLed(9, z2state,250);
   
+  timerDB[8]=millis()-timerProc;
+  
+  timerRun=millis();
   do 
   {
     z1run=z1.runAcc();
     z2run=z2.runAcc();
   } while (z1run || z2run);
-  
-  digitalWrite(9, LOW);
+  timerDB[9]=millis()-timerRun;
+  z1pos[0]=z1.currentPosition();
+  z2pos[0]=z2.currentPosition();
+
 }
 
 //------------------------------------------------------------------------------
@@ -461,7 +534,7 @@ void setAlarm(void)
   }
   else seqMultiple=seqMultiple+1;    
   
-  runTime = (seqCount * seqPeriod) + (((seqPos * PRBSmultiple) + seqMultiple) * dT);
+  runTime = (seqCount * seqPeriod) + (((seqPos * PRBSmultiple) + seqMultiple) * dT)-1;
   dAlarm = dStart.unixtime() + runTime;
   
   RTC.setAlarm(dAlarm);
@@ -575,10 +648,7 @@ void flashLed(int pin, int times, int wait)
     digitalWrite(pin, HIGH);
     delay(wait);
     digitalWrite(pin, LOW);
-    
-    if (i + 1 < times) {
-      delay(wait);
-    }
+    delay(wait);
   }
 }
 
