@@ -329,11 +329,13 @@ void loop()
   getTimeS(); 
   // Get correct time and speed points for interpolation
   
-  if (z1decayC<2) targetRPM[0]=395;
-  else if (z1decayC<4) targetRPM[0]=585;
-  else if (z1decayC<6) targetRPM[0]=775;
-  else if (z1decayC<8) targetRPM[0]=965;
-  else if (z1decayC<10) targetRPM[0]=1155;
+  if (z1decayC<10) {
+    if (z1decayC%5==0) targetRPM[0]=395;
+    else if (z1decayC%5==1) targetRPM[0]=585;
+    else if (z1decayC%5==2) targetRPM[0]=775;
+    else if (z1decayC%5==3) targetRPM[0]=965;
+    else if (z1decayC%5==4) targetRPM[0]=1155;
+  }
   else {
     targetRPM[0]=2000; // Turn off pump after 3x2 decays
     z1state=0; 
@@ -344,11 +346,13 @@ void loop()
     z1state=0; 
   }
       
-  if (z2decayC<2) targetRPM[3]=395;
-  else if (z2decayC<4) targetRPM[3]=585;
-  else if (z2decayC<6) targetRPM[3]=775;
-  else if (z2decayC<8) targetRPM[3]=965;
-  else if (z2decayC<10) targetRPM[3]=1155;
+  if (z2decayC<10) {
+    if (z2decayC%5==0) targetRPM[3]=395;
+    else if (z2decayC%5==1) targetRPM[3]=585;
+    else if (z2decayC%5==2) targetRPM[3]=775;
+    else if (z2decayC%5==3) targetRPM[3]=965;
+    else if (z2decayC%5==4) targetRPM[3]=1155;
+  }
   else {
     targetRPM[3]=2000;
     z2state=0; 
