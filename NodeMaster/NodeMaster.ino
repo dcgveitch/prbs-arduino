@@ -221,19 +221,21 @@ void setup()
     prevFanTime = 0;
     dataFile.seekSet(4);
     for (int i = 0; i < NFans; i++) {
-      prevRPM[i]=dataFile.read()*10;
+      prevRPM[i]=dataFile.read()*256L;
+      prevRPM[i]=prevRPM[i]+dataFile.read();
       if (warmup) targetRPM[i] = 2000;
       else targetRPM[i] = prevRPM[i];
       tachWrite(i,targetRPM[i]);
     }
     
-    fanFilePos = NFans+4;
+    fanFilePos = (NFans*2)+4;
     nextFanTime=dataFile.read();
     nextFanTime=nextFanTime+(dataFile.read()*256L);
     nextFanTime=nextFanTime+(dataFile.read()*65536L);
     nextFanTime=nextFanTime+(dataFile.read()*16777216L);
     for (int i = 0; i < NFans; i++) {
-      nextRPM[i]=dataFile.read()*10;
+      nextRPM[i]=dataFile.read()*256L;
+      nextRPM[i]=nextRPM[i]+dataFile.read();
     }
     dataFile.close();
   }
@@ -326,22 +328,6 @@ void loop()
       delay(100);
     }
   }
-  //////
-  
-  // OPTION 2 - Repeat pump setting based on sequence position for charge up/decay testing
-//  if (seqCount==0) {
-//    z1state=1;
-//    z2state=0;
-//  }
-//  else if (seqCount==2) {
-//    z1state=0;
-//    z2state=1;
-//  }
-//  else {
-//    z1state=0;
-//    z2state=0;
-//  }
-  //////
   
   if (z1state | warmup) z1.moveOn();
   else z1.moveOff();
@@ -353,7 +339,7 @@ void loop()
   // Get correct time and speed points for interpolation
   
   while ((dNow.unixtime()-dStart.unixtime())>nextFanTime) {
-    fanFilePos = fanFilePos+NFans+4;
+    fanFilePos = fanFilePos+(NFans*2)+4;
     dataFile.open("zfnspeed.dat", O_READ);
     if (dataFile.isOpen()) {
       dataFile.seekSet(fanFilePos);
@@ -364,7 +350,8 @@ void loop()
       nextFanTime=nextFanTime+(dataFile.read()*16777216L);
       for (int i = 0; i < NFans; i++) {
         prevRPM[i]=nextRPM[i];
-        nextRPM[i]=dataFile.read()*10;
+        nextRPM[i]=dataFile.read()*256L;
+        nextRPM[i]=nextRPM[i]+dataFile.read();
       }
     }
     dataFile.close();
