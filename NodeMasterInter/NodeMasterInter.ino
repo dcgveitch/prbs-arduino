@@ -330,12 +330,11 @@ void loop()
   // Get correct time and speed points for interpolation
   
   if (z1decayC<10) {
-    if (z1state==1) targetRPM[1]=0;
-    else if (z1decayC%5==0) targetRPM[1]=560;
-    else if (z1decayC%5==1) targetRPM[1]=680;
-    else if (z1decayC%5==2) targetRPM[1]=800;
-    else if (z1decayC%5==3) targetRPM[1]=920;
-    else if (z1decayC%5==4) targetRPM[1]=1040;
+    if (z1decayC%5==0) targetRPM[1]=650;
+    else if (z1decayC%5==1) targetRPM[1]=750;
+    else if (z1decayC%5==2) targetRPM[1]=850;
+    else if (z1decayC%5==3) targetRPM[1]=950;
+    else if (z1decayC%5==4) targetRPM[1]=1050;
   }
   else {
     targetRPM[1]=2000; // Turn off pump after 3x2 decays
@@ -343,17 +342,16 @@ void loop()
   }
     
   if (zoneTest[0]==0) {
-    targetRPM[1]=800;
+    targetRPM[1]=850;
     z1state=0; // If not testing zone, no release
   }
       
   if (z2decayC<10) {
-    if (z2state==1) targetRPM[2]=0;
-    else if (z2decayC%5==0) targetRPM[2]=560;
-    else if (z2decayC%5==1) targetRPM[2]=680;
-    else if (z2decayC%5==2) targetRPM[2]=800;
-    else if (z2decayC%5==3) targetRPM[2]=920;
-    else if (z2decayC%5==4) targetRPM[2]=1040;
+    if (z2decayC%5==0) targetRPM[2]=650;
+    else if (z2decayC%5==1) targetRPM[2]=750;
+    else if (z2decayC%5==2) targetRPM[2]=850;
+    else if (z2decayC%5==3) targetRPM[2]=950;
+    else if (z2decayC%5==4) targetRPM[2]=1050;
   }
   else {
     targetRPM[2]=2000;
@@ -361,7 +359,7 @@ void loop()
   }
   
   if (zoneTest[1]==0) {
-    targetRPM[2]=800;
+    targetRPM[2]=850;
     z2state=0; 
   }
     
